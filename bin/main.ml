@@ -16,6 +16,7 @@ let params_for
   ~skew_bps
   ~max_position
   ~requote_ms
+  ~max_actions_per_sec
   =
   Or_error.try_with_join (fun () ->
     let base =
@@ -33,6 +34,8 @@ let params_for
           Option.value half_spread_bps ~default:base.base_half_spread_bps
       ; skew_bps = Option.value skew_bps ~default:base.skew_bps
       ; requote_interval_ms = Option.value requote_ms ~default:base.requote_interval_ms
+      ; max_actions_per_sec =
+          Option.value max_actions_per_sec ~default:base.max_actions_per_sec
       })
 ;;
 
@@ -99,6 +102,11 @@ let command =
          "-requote-ms"
          (optional int)
          ~doc:"MS requote and open-orders poll interval (default 1000)"
+     and max_actions_per_sec =
+       flag
+         "-max-actions-per-sec"
+         (optional int)
+         ~doc:"N halt when plans send more cancels and places than this in a second (100)"
      and run_for =
        flag
          "-run-for"
@@ -155,7 +163,8 @@ let command =
                 ~half_spread_bps
                 ~skew_bps
                 ~max_position
-                ~requote_ms)
+                ~requote_ms
+                ~max_actions_per_sec)
            ~summary_interval:(Time_ns.Span.of_sec summary_secs)
            ~stop
        in
