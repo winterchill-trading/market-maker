@@ -137,6 +137,19 @@ tick after it with its plan (`(Tick (now <ns>) (plan (...)))`).
 one per input; the live loop coalesces ticks on its sequencer, so its plans can come at
 slightly different moments. Books make the file grow by about 20 KB a second.
 
+### Mirrors and reconnects
+
+The shadow and the strategy log attach to the venue in the `on_venue` hook of
+`Mm_core.Live.connect_and_start`, before the loop takes its first snapshots, and register
+`Live.on_resync` hooks: on every venue reconnect their mirror strategies start the same
+action rate grace period as the live loop (`Shadow.on_resync`, `Strategy_log.on_resync`,
+at the time source's now), and the log gets a `(Resync (now <ns>))` line that `Replay.run`
+feeds to `Mm_core.Strategy.on_resync`. Without that, the requote burst after a reconnect
+halted the mirrors (and made a replay diverge) while the live loop kept quoting. A 30 s
+`scripts/e2e-all.sh` run after the change: hyperliquid p50=40us p99=170us, binance
+p50=56us p99=758us, bybit p50=41us p99=2.2ms, fault-binance p50=53us p99=677us (two
+reconnects, ended `Running`), within run-to-run noise of the table below.
+
 ## Library
 
 `Market_maker.Venues`: `Venue_choice.t = Hyperliquid | Binance | Bybit` and
@@ -331,6 +344,8 @@ position; cancelling an order twice is not an error.
 `dune test` checks venue parsing, endpoints, base URL overrides and the credential
 checks, and drives `Session` over an in-memory venue on a synthetic clock: tick-to-order
 stats, reloads (rejected, applied, unchanged) through a pipe standing in for SIGHUP,
-shadow plans, and a strategy log that replays to the same plans. `Params_file`, `Shadow`,
+shadow plans, a strategy log that replays to the same plans, and a reconnect followed by
+a requote burst that halts neither the loop nor its mirrors (and does halt both without
+the reconnect's grace period). `Params_file`, `Shadow`,
 `Strategy_log` and `Restartable_venue` have their own tests. The adapters' own test
 suites run the strategy on each simulator.
