@@ -128,7 +128,7 @@ let command =
          (optional Filename_unix.arg_type)
          ~doc:
            "FILE parameter overrides, a sexp such as ((levels 5) (skew_bps 6)); read \
-            again on SIGHUP, which restarts the loop with them if they validate"
+            again on SIGHUP and swapped into the running loop if they validate"
      and shadow_params_file =
        flag
          "-shadow-params"
