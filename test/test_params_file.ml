@@ -67,3 +67,22 @@ let%expect_test "load from a file" =
   [%expect {| (params.base_half_spread_bps 6) |}];
   return ()
 ;;
+
+let%expect_test "action rate grace and cooldown keys" =
+  (* Left out of the base sexp at their defaults, still known names. The cooldown is a
+     plain number: leaving it out means none. *)
+  show "((action_rate_grace_ms 2000) (action_rate_cooldown_ms 30000))";
+  show "((action_rate_grace_ms 5000))";
+  show "((action_rate_grace_ms -1))";
+  show "((action_rate_cooldown_ms 0))";
+  [%expect
+    {|
+    (ok ((action_rate_grace_ms 2000) (action_rate_cooldown_ms 30000)))
+    (ok ())
+    (rejected
+     ("invalid params" (errors ("action_rate_grace_ms must be non-negative"))))
+    (rejected
+     ("invalid params" (errors ("action_rate_cooldown_ms must be positive"))))
+    |}];
+  return ()
+;;
