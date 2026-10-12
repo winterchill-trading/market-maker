@@ -132,6 +132,7 @@ module Make (V : Mm_core.Venue.S) = struct
     ?(reload = Pipe.empty ())
     ?shadow_params
     ?strategy_log
+    ?order_log
     config
     ~symbol
     ~params
@@ -148,10 +149,20 @@ module Make (V : Mm_core.Venue.S) = struct
         Monitor.try_with_or_error (fun () -> Writer.open_file path)
         >>| Or_error.map ~f:Option.some
     in
+    let%bind.Deferred.Or_error order_log =
+      match (order_log : Order_log.Spec.t option) with
+      | None -> Deferred.Or_error.return None
+      | Some { path; venue } ->
+        Monitor.try_with_or_error (fun () -> Writer.open_file path)
+        >>| Or_error.map ~f:(fun writer ->
+          Some (writer, Order_log.create writer ~venue ~now))
+    in
     let venue = ref None in
     let prepared = ref None in
     let on_venue v =
       venue := Some v;
+      Option.iter order_log ~f:(fun (_, log) ->
+        Venue.add_order_observer v (Order_log.on_event log));
       Venue.add_observer v (fun input ->
         Option.iter !prepared ~f:(fun p -> Prepared.on_input p input ~now:(now ())))
     in
@@ -171,7 +182,11 @@ module Make (V : Mm_core.Venue.S) = struct
       prepared := Some { Prepared.instrument; mid; first_params; shadow; log };
       first_params
     in
-    let close_log () = Option.value_map log_writer ~default:(return ()) ~f:Writer.close in
+    let close_log () =
+      let%bind () = Option.value_map log_writer ~default:(return ()) ~f:Writer.close in
+      Option.value_map order_log ~default:(return ()) ~f:(fun (writer, _) ->
+        Writer.close writer)
+    in
     (* The loop closes the venue on every path, but closing a {!Restartable_venue} does
        nothing: the connection goes down here. *)
     let shutdown () =

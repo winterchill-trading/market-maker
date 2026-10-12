@@ -75,6 +75,7 @@ module type RUNNER = sig
     -> ?reload:unit Pipe.Reader.t
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> ?strategy_log:string
+    -> ?order_log:string
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t
@@ -86,6 +87,11 @@ end
 let simulator_address = "0x0000000000000000000000000000000000006d6d"
 let local_api_key = "market-maker"
 let hyperliquid_min_notional = Usd.of_int 10
+
+let order_log_spec ~venue order_log =
+  Option.map order_log ~f:(fun path ->
+    { Order_log.Spec.path; venue = Venue_choice.to_string venue })
+;;
 
 module Hyperliquid_live = Session.Make (Hl_mm.Hl_venue.Trading)
 module Binance_live = Session.Make (Binance_client.Venue)
@@ -173,12 +179,14 @@ let hyperliquid ?base_url ?address ?(allow_mainnet = false) ~getenv ~network () 
       ?reload
       ?shadow_params
       ?strategy_log
+      ?order_log
       =
       Hyperliquid_live.connect_and_run
         ?time_source
         ?reload
         ?shadow_params
         ?strategy_log
+        ?order_log:(order_log_spec ~venue order_log)
         handle
     ;;
   end : RUNNER)
@@ -233,12 +241,14 @@ let binance ?base_url ~getenv ~network () =
       ?reload
       ?shadow_params
       ?strategy_log
+      ?order_log
       =
       Binance_live.connect_and_run
         ?time_source
         ?reload
         ?shadow_params
         ?strategy_log
+        ?order_log:(order_log_spec ~venue order_log)
         config
     ;;
   end : RUNNER)
@@ -275,8 +285,15 @@ let bybit ?base_url ~getenv ~network () =
       ?reload
       ?shadow_params
       ?strategy_log
+      ?order_log
       =
-      Bybit_live.connect_and_run ?time_source ?reload ?shadow_params ?strategy_log config
+      Bybit_live.connect_and_run
+        ?time_source
+        ?reload
+        ?shadow_params
+        ?strategy_log
+        ?order_log:(order_log_spec ~venue order_log)
+        config
     ;;
   end : RUNNER)
 ;;

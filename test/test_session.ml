@@ -395,3 +395,65 @@ let%expect_test "after a reconnect, a requote burst halts neither the loop nor i
     |}];
   return ()
 ;;
+
+let%expect_test "the order log of a session: places, acks, a fill, the final cancels" =
+  Log.Global.set_output [];
+  let time_source = Time_source.create ~now:Session_helpers.start_time () in
+  let venue = Fake_venue.create ~time_source:(Time_source.read_only time_source) () in
+  Fake_venue.push_book venue ~bid:"99990" ~ask:"100010";
+  let path = Filename_unix.temp_file "session" ".csv" in
+  let stop = Ivar.create () in
+  let outcome =
+    Session.connect_and_run
+      ~time_source:(Time_source.read_only time_source)
+      ~order_log:{ path; venue = "fake" }
+      venue
+      ~symbol:Fake_venue.btc
+      ~params:(fun instrument ~mid ->
+        Ok { (Mm_core.Params.for_instrument instrument ~mid) with levels = 1 })
+      ~summary_interval:(Time_ns.Span.of_int_sec 60)
+      ~stop:(Ivar.read stop)
+  in
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 500) in
+  Fake_venue.fill_best venue Buy;
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 100) in
+  Ivar.fill_exn stop ();
+  let%bind outcome = Session_helpers.advance_until time_source outcome in
+  ok_exn outcome |> (ignore : Market_maker.Session.Outcome.t -> unit);
+  let%bind contents = Reader.file_contents path in
+  (* The first plan's moment depends on file IO outside the synthetic clock, so the local
+     times are only checked to be in order and after the start. *)
+  let start = Time_ns.to_int_ns_since_epoch Session_helpers.start_time in
+  let lines = String.split_lines contents in
+  let local_times =
+    List.tl_exn lines
+    |> List.map ~f:(fun line -> Int.of_string (List.hd_exn (String.split line ~on:',')))
+  in
+  print_s
+    [%message
+      ""
+        ~in_order:(List.is_sorted local_times ~compare:Int.compare : bool)
+        ~after_start:(List.for_all local_times ~f:(fun t -> t >= start) : bool)];
+  List.iteri lines ~f:(fun i line ->
+    if i = 0
+    then print_endline line
+    else (
+      match String.lsplit2 line ~on:',' with
+      | Some (_, rest) -> print_endline ("T," ^ rest)
+      | None -> print_endline line));
+  [%expect
+    {|
+    ((in_order true) (after_start true))
+    local_ts,venue_ts,venue,symbol,event,side,price,size,order_id,client_order_id,status,trade_id,fee,detail
+    T,,fake,BTC,place,buy,99970,0.001,,0x42544300000000000000000000000000,,,,
+    T,,fake,BTC,place,sell,100030,0.001,,0x42544300000000000100000000000000,,,,
+    T,,fake,BTC,ack,buy,99970,0.001,1,0x42544300000000000000000000000000,resting,,,
+    T,,fake,BTC,ack,sell,100030,0.001,2,0x42544300000000000100000000000000,resting,,,
+    T,0,fake,BTC,update,buy,99970,0,1,0x42544300000000000000000000000000,filled,,,filled 0
+    T,0,fake,BTC,fill,buy,99970,0.001,1,0x42544300000000000000000000000000,maker,1,0,
+    T,,fake,BTC,cancel_all,,,,,,,,,
+    T,0,fake,BTC,update,sell,100030,0,2,0x42544300000000000100000000000000,cancelled,,,filled 0
+    T,,fake,BTC,cancel_all_ack,,,,,,ok,,,
+    |}];
+  return ()
+;;

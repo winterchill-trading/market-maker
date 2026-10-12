@@ -47,12 +47,17 @@ module Make (V : Mm_core.Venue.S) : sig
 
       With [strategy_log], every strategy input and plan goes to that file as a
       {!Strategy_log} (truncated before connecting, an [Update_params] line at each
-      reload, a [Resync] line at each venue reconnect). *)
+      reload, a [Resync] line at each venue reconnect).
+
+      With [order_log], every place and cancel request, its answer, and every order update
+      and fill goes to that file as an {!Order_log} (truncated before connecting, closed
+      after the final cancel-all). *)
   val connect_and_run
     :  ?time_source:Time_source.t
     -> ?reload:unit Pipe.Reader.t
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> ?strategy_log:string
+    -> ?order_log:Order_log.Spec.t
     -> V.config
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
