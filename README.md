@@ -129,8 +129,14 @@ instrument defaults and the flags:
 ((levels 5)
  (base_half_spread_bps 4)
  (soft_max_position (0.005))
- (max_actions_per_sec 300))
+ (max_actions_per_sec 300)
+ (requote_interval_ms 500ms))
 ```
+
+Durations (the `_ms` fields) are `Time_ns.Span.t`: a value is a span (`500ms`, `2s`,
+`1m`) or, as in older files, a bare integer of milliseconds, so `(requote_interval_ms
+500)` and `(requote_interval_ms 500ms)` are the same. Logged parameters print spans. The
+`-*-ms` flags still take integer milliseconds.
 
 `kill -HUP <pid>` reads the file again. Unknown or repeated fields, a different `symbol`
 and values that fail `Params.validate` are logged and the current parameters stay. Valid
@@ -147,8 +153,9 @@ flag: `action_rate_grace_ms` (default 5000) is the window after a venue reconnec
 which actions are neither counted nor checked, so the requote burst after a resync (a
 restarted simulator, a dropped stream) cannot trip the switch; `action_rate_cooldown_ms`
 (default none) clears a `Max_action_rate` halt that long after it tripped. Both are left
-out of the parameter sexp at their defaults; in a file the cooldown is a plain number
-(`(action_rate_cooldown_ms 30000)`) and leaving it out means none.
+out of the parameter sexp at their defaults; in a file the cooldown is a span or a number
+of milliseconds (`(action_rate_cooldown_ms 30s)` or `(action_rate_cooldown_ms 30000)`)
+and leaving it out means none.
 
 ### Shadow parameters
 
