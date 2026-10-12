@@ -31,6 +31,10 @@ pins are not needed. `https://` and `wss://` need `async_ssl` built
 against OpenSSL 3; see
 [hl-client's notes](https://github.com/winterchill-trading/hl-client#macos-and-openssl).
 
+CI installs the pinned siblings and the opam dependencies through the shared
+[ox-setup](https://github.com/winterchill-trading/infra/blob/main/docs/ci.md) action, which
+caches the built opam switch between runs.
+
 ## Usage
 
 ```sh
