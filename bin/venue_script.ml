@@ -1,5 +1,5 @@
-(* One order sequence, the same on every venue, between two accounts (a maker and a
-   taker) on a simulator without noise traders, printed in a venue-neutral form so that
+(* One order sequence, the same on every venue, between two accounts (a maker and a taker)
+   on a simulator without noise traders, printed in a venue-neutral form so that
    scripts/compare-venues.sh can diff two venues line by line. *)
 
 open! Core
@@ -63,7 +63,8 @@ module Run (V : Mm_core.Venue.S) = struct
       match account with
       | Error error -> "error " ^ Error.to_string_hum error
       | Ok (a : Account_view.t) ->
-        List.find a.positions ~f:(fun (p : Position_view.t) -> Symbol.equal p.symbol symbol)
+        List.find a.positions ~f:(fun (p : Position_view.t) ->
+          Symbol.equal p.symbol symbol)
         |> Option.value_map ~default:"0" ~f:(fun (p : Position_view.t) ->
           Size.to_string p.size)
     in
@@ -101,15 +102,28 @@ module Run (V : Mm_core.Venue.S) = struct
     let limit ?tif ?reduce_only side p s =
       Order_request.limit ?tif ?reduce_only symbol side ~px:(px p) ~size:(sz s)
     in
-    let%bind bid = place m "maker alo buy 0.01@99000" (limit ~tif:Alo Buy "99000" "0.01") in
-    let%bind ask = place m "maker alo sell 0.01@101000" (limit ~tif:Alo Sell "101000" "0.01") in
-    let%bind _ = place t "taker alo buy 0.01@101000 (crosses)" (limit ~tif:Alo Buy "101000" "0.01") in
-    let%bind _ = place t "taker gtc buy 0.004@101000" (limit Buy "101000" "0.004") in
-    let%bind _ = place t "taker ioc sell 0.02@98000" (limit ~tif:Ioc Sell "98000" "0.02") in
-    let%bind _ =
-      place t "taker market buy 0.003" (Order_request.market symbol Buy ~size:(sz "0.003"))
+    let%bind bid =
+      place m "maker alo buy 0.01@99000" (limit ~tif:Alo Buy "99000" "0.01")
     in
-    let%bind _ = place m "maker gtc buy 0.001@101000 (self)" (limit Buy "101000" "0.001") in
+    let%bind ask =
+      place m "maker alo sell 0.01@101000" (limit ~tif:Alo Sell "101000" "0.01")
+    in
+    let%bind _ =
+      place t "taker alo buy 0.01@101000 (crosses)" (limit ~tif:Alo Buy "101000" "0.01")
+    in
+    let%bind _ = place t "taker gtc buy 0.004@101000" (limit Buy "101000" "0.004") in
+    let%bind _ =
+      place t "taker ioc sell 0.02@98000" (limit ~tif:Ioc Sell "98000" "0.02")
+    in
+    let%bind _ =
+      place
+        t
+        "taker market buy 0.003"
+        (Order_request.market symbol Buy ~size:(sz "0.003"))
+    in
+    let%bind _ =
+      place m "maker gtc buy 0.001@101000 (self)" (limit Buy "101000" "0.001")
+    in
     let%bind _ =
       place t "taker ioc buy 0.001@100000 (empty)" (limit ~tif:Ioc Buy "100000" "0.001")
     in
@@ -125,8 +139,12 @@ module Run (V : Mm_core.Venue.S) = struct
         "taker reduce-only buy 0.01@101000"
         (limit ~reduce_only:true Buy "101000" "0.01")
     in
-    let%bind _ = place t "taker gtc buy 0.001@99000.5 (tick)" (limit Buy "99000.5" "0.001") in
-    let%bind _ = place t "taker gtc buy 0.0005@90000 (lot)" (limit Buy "90000" "0.0005") in
+    let%bind _ =
+      place t "taker gtc buy 0.001@99000.5 (tick)" (limit Buy "99000.5" "0.001")
+    in
+    let%bind _ =
+      place t "taker gtc buy 0.0005@90000 (lot)" (limit Buy "90000" "0.0005")
+    in
     let%bind _ = place t "taker gtc buy 0.001@90000 ($90)" (limit Buy "90000" "0.001") in
     let%bind () =
       cancel m symbol "maker cancel the rest" (List.filter_opt [ bid; ask ])
