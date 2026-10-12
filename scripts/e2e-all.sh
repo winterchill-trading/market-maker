@@ -12,7 +12,8 @@
 # Starts by printing the commit each sibling checkout in the workspace is at (WORKSPACE,
 # default the parent of this checkout), marked "+dirty" with uncommitted changes.
 #
-# Ends with each venue's tick-to-order latency (book update to plan sent). Logs go to
+# Ends with each venue's tick-to-order latency (book update to plan sent) and its long
+# Async cycles (over 50 ms and over 20 ms). Logs go to
 # LOG_DIR/<venue> and LOG_DIR/fault-<venue> (LOG_DIR defaults to a temporary directory).
 set -euo pipefail
 
@@ -60,6 +61,11 @@ echo "--- tick-to-order latency ---"
 for venue in "${venues[@]}"; do
   stats="$(sed -n 's/^tick-to-order *//p' "$log_root/$venue/report.txt" 2>/dev/null || true)"
   printf '%-14s %s\n' "$venue" "${stats:-missing}"
+done
+echo "--- long async cycles ---"
+for venue in "${venues[@]}"; do
+  cycles="$(sed -n 's/^async cycles *//p' "$log_root/$venue/report.txt" 2>/dev/null || true)"
+  printf '%-14s %s\n' "$venue" "${cycles:-missing}"
 done
 if [[ ${#failed[@]} -gt 0 ]]; then
   echo "e2e-all: failed: ${failed[*]}" >&2
