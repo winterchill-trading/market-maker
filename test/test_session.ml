@@ -309,3 +309,89 @@ let%expect_test "a reload mid-run moves the quotes without a cancel-all" =
     |}];
   return ()
 ;;
+
+(* A reconnect followed by a requote burst (the mid flips by 10 bps every 2 ms, so each
+   tick replaces the ladder), with and without the reconnect: the shadow strategies and
+   the strategy log's mirror start the same grace period as the live loop. *)
+let reconnect_burst ~reconnect =
+  Log.Global.set_output [];
+  let path = Filename_unix.temp_file "session" ".log" in
+  let time_source = Time_source.create ~now:Session_helpers.start_time () in
+  let venue = Fake_venue.create ~time_source:(Time_source.read_only time_source) () in
+  Fake_venue.push_book venue ~bid:"99990" ~ask:"100010";
+  let params ~levels instrument ~mid =
+    Ok
+      { (Mm_core.Params.for_instrument instrument ~mid) with
+        levels
+      ; max_actions_per_sec = 40
+      ; action_rate_grace_ms = 1_000
+      }
+  in
+  let stop = Ivar.create () in
+  let outcome =
+    Session.connect_and_run
+      ~time_source:(Time_source.read_only time_source)
+      ~shadow_params:(params ~levels:1)
+      ~strategy_log:path
+      venue
+      ~symbol:Fake_venue.btc
+      ~params:(params ~levels:3)
+      ~summary_interval:(Time_ns.Span.of_int_sec 60)
+      ~stop:(Ivar.read stop)
+  in
+  let%bind () =
+    Session_helpers.wait_until ~what:"first quotes" (fun () ->
+      not (List.is_empty (Fake_venue.resting venue)))
+  in
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_sec 3) in
+  if reconnect then Fake_venue.reconnect venue;
+  let%bind () =
+    Deferred.List.iter ~how:`Sequential (List.range 0 100) ~f:(fun i ->
+      let mid = if i % 2 = 0 then 100_000 else 100_100 in
+      Fake_venue.push_book
+        venue
+        ~bid:(Int.to_string (mid - 10))
+        ~ask:(Int.to_string (mid + 10));
+      let%bind () =
+        Time_source.advance_by_alarms_by time_source (Time_ns.Span.of_int_ms 2)
+      in
+      Scheduler.yield_until_no_jobs_remain ())
+  in
+  Ivar.fill_exn stop ();
+  let%bind outcome = Session_helpers.advance_until time_source outcome in
+  let outcome = ok_exn outcome in
+  let%bind events = Strategy_log.load path >>| ok_exn in
+  Core_unix.unlink path;
+  let shadow = Option.value_exn outcome.shadow in
+  let replay = ok_exn (Strategy_log.Replay.run events) in
+  print_s
+    [%message
+      (reconnect : bool)
+        ~live:(outcome.report.mode : Mm_core.Strategy.Mode.t)
+        ~shadow_mirror:(shadow.live_mode : Mm_core.Strategy.Mode.t)
+        ~shadow:(shadow.shadow_mode : Mm_core.Strategy.Mode.t)
+        ~resyncs_logged:
+          (List.count events ~f:(function
+             | Resync _ -> true
+             | _ -> false)
+           : int)
+        ~replay_ticks:(replay.ticks : int)
+        ~replay_mismatches:(List.length replay.mismatches : int)];
+  return ()
+;;
+
+let%expect_test "after a reconnect, a requote burst halts neither the loop nor its \
+                 mirrors"
+  =
+  let%bind () = reconnect_burst ~reconnect:true in
+  let%bind () = reconnect_burst ~reconnect:false in
+  [%expect
+    {|
+    ((reconnect true) (live Running) (shadow_mirror Running) (shadow Running)
+     (resyncs_logged 1) (replay_ticks 515) (replay_mismatches 0))
+    ((reconnect false) (live (Halted (Max_action_rate (actions 48))))
+     (shadow_mirror (Halted (Max_action_rate (actions 48)))) (shadow Running)
+     (resyncs_logged 0) (replay_ticks 133) (replay_mismatches 0))
+    |}];
+  return ()
+;;
