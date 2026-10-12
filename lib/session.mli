@@ -39,11 +39,15 @@ module Make (V : Mm_core.Venue.S) : sig
       With [shadow_params], a {!Shadow} strategy runs on the same inputs with those
       parameters (built like [params], and read again on every reload) and its differing
       plans are logged; an error at start fails the run, on reload it keeps the current
-      shadow parameters. *)
+      shadow parameters.
+
+      With [strategy_log], every strategy input and plan goes to that file as a
+      {!Strategy_log} (truncated at the start, a new [Params] line at each reload). *)
   val connect_and_run
     :  ?time_source:Time_source.t
     -> ?reload:unit Pipe.Reader.t
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
+    -> ?strategy_log:string
     -> V.config
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)

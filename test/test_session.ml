@@ -176,3 +176,68 @@ let%expect_test "a shadow with one level logs its differing plans" =
     |}];
   return ()
 ;;
+
+let%expect_test "the strategy log of a session replays to the same plans" =
+  Log.Global.set_output [];
+  let path = Filename_unix.temp_file "session" ".log" in
+  let time_source = Time_source.create ~now:Session_helpers.start_time () in
+  let venue = Fake_venue.create ~time_source:(Time_source.read_only time_source) () in
+  Fake_venue.push_book venue ~bid:"99990" ~ask:"100010";
+  let reload_r, reload_w = Pipe.create () in
+  let levels = ref 3 in
+  let stop = Ivar.create () in
+  let outcome =
+    Session.connect_and_run
+      ~time_source:(Time_source.read_only time_source)
+      ~reload:reload_r
+      ~strategy_log:path
+      venue
+      ~symbol:Fake_venue.btc
+      ~params:(fun instrument ~mid ->
+        Ok { (Mm_core.Params.for_instrument instrument ~mid) with levels = !levels })
+      ~summary_interval:(Time_ns.Span.of_int_sec 60)
+      ~stop:(Ivar.read stop)
+  in
+  let%bind () =
+    Deferred.List.iter
+      ~how:`Sequential
+      [ "100000", "100020"; "100100", "100120"; "100050", "100070"; "99900", "99920" ]
+      ~f:(fun (bid, ask) ->
+        Fake_venue.push_book venue ~bid ~ask;
+        Fake_venue.fill_best venue Buy;
+        Session_helpers.advance time_source (Time_ns.Span.of_int_ms 700))
+  in
+  levels := 1;
+  Pipe.write_without_pushback reload_w ();
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 500) in
+  Fake_venue.push_book venue ~bid:"99950" ~ask:"99970";
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 1500) in
+  Ivar.fill_exn stop ();
+  let%bind outcome = Session_helpers.advance_until time_source outcome in
+  let outcome = ok_exn outcome in
+  let%bind events = Strategy_log.load path >>| ok_exn in
+  Core_unix.unlink path;
+  let count f = List.count events ~f in
+  print_s
+    [%message
+      (outcome.reloads : int)
+        (outcome.report.fills : int)
+        ~params_lines:
+          (count (function
+             | Params _ -> true
+             | _ -> false)
+           : int)
+        ~fills_logged:
+          (count (function
+             | Input (Fill _) -> true
+             | _ -> false)
+           : int)];
+  print_s [%sexp (ok_exn (Strategy_log.Replay.run events) : Strategy_log.Replay.t)];
+  [%expect
+    {|
+    ((outcome.reloads 1) ("(outcome.report).fills" 3) (params_lines 2)
+     (fills_logged 3))
+    ((ticks 57) (plans 6) (mismatches ()))
+    |}];
+  return ()
+;;

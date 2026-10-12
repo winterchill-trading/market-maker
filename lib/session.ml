@@ -159,6 +159,7 @@ module Make (V : Mm_core.Venue.S) = struct
     ?(time_source = Time_source.wall_clock ())
     ?(reload = Pipe.empty ())
     ?shadow_params
+    ?strategy_log
     config
     ~symbol
     ~params
@@ -191,6 +192,25 @@ module Make (V : Mm_core.Venue.S) = struct
     match%bind prepared with
     | Error error -> fail error
     | Ok (instrument, mid, first_params, shadow) ->
+      let%bind strategy_log =
+        match strategy_log with
+        | None -> return None
+        | Some path ->
+          let%map log = Strategy_log.create path ~params:first_params in
+          Venue.add_observer venue (fun input ->
+            Strategy_log.on_input
+              log
+              input
+              ~now:(Time_ns.to_int_ns_since_epoch (Time_source.now time_source)));
+          Some log
+      in
+      let close_log () =
+        Option.value_map strategy_log ~default:(return ()) ~f:Strategy_log.close
+      in
+      let fail error =
+        let%bind () = close_log () in
+        fail error
+      in
       let finish ~past ~reloads live =
         let%bind report = Live.stop live in
         let report, tick_to_order =
@@ -200,7 +220,8 @@ module Make (V : Mm_core.Venue.S) = struct
             ( merge_reports past_report report
             , merge_stats past_stats (Live.tick_to_order live) )
         in
-        let%map () = Venue.shutdown venue in
+        let%bind () = Venue.shutdown venue in
+        let%map () = close_log () in
         Ok
           { Outcome.report
           ; tick_to_order
@@ -240,6 +261,7 @@ module Make (V : Mm_core.Venue.S) = struct
              in
              Venue.next_loop venue;
              reload_shadow ~live:next ~live_changed:true;
+             Option.iter strategy_log ~f:(Strategy_log.restart ~params:next);
              (match%bind start next with
               | Error error -> fail error
               | Ok live -> loop live ~current:next ~past ~reloads:(reloads + 1)))
