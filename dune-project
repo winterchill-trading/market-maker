@@ -32,4 +32,6 @@
   bybit-protocol
   bybit-client
   ppx_jane
-  uri))
+  uri
+  (cohttp-async :with-test)
+  (hl-sim :with-test)))

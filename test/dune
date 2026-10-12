@@ -5,7 +5,11 @@
   core_unix
   core_unix.filename_unix
   async
+  cohttp-async
   exchange-core
+  hl-client
+  hl-protocol
+  hl-sim
   market-maker
   mm-core
   uri)
