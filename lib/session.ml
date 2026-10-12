@@ -10,17 +10,20 @@ module Outcome = struct
     ; tick_to_order : Stats.t option
     ; reloads : int
     ; shadow : Shadow.Stats.t option
+    ; cycles : Cycle_monitor.Stats.t option
     }
   [@@deriving sexp_of]
 
   let to_string_hum t =
     String.concat
       ~sep:"\n"
-      ([ Report.to_string_hum t.report
-       ; sprintf
-           "tick-to-order    %s"
-           (Option.value_map t.tick_to_order ~default:"-" ~f:Stats.to_string_hum)
-       ]
+      ([ Report.to_string_hum t.report ]
+       @ Option.value_map t.cycles ~default:[] ~f:(fun cycles ->
+         [ sprintf "async cycles     %s" (Cycle_monitor.Stats.to_string_hum cycles) ])
+       @ [ sprintf
+             "tick-to-order    %s"
+             (Option.value_map t.tick_to_order ~default:"-" ~f:Stats.to_string_hum)
+         ]
        @ (if t.reloads > 0 then [ sprintf "params reloads   %d" t.reloads ] else [])
        @ Option.value_map t.shadow ~default:[] ~f:(fun (s : Shadow.Stats.t) ->
          [ sprintf "shadow plans     %d of %d differ" s.differing s.plans ]))
@@ -133,6 +136,7 @@ module Make (V : Mm_core.Venue.S) = struct
     ?shadow_params
     ?strategy_log
     ?order_log
+    ?cycle_monitor
     config
     ~symbol
     ~params
@@ -214,8 +218,25 @@ module Make (V : Mm_core.Venue.S) = struct
       (* Mirror strategies start the same action rate grace period as the loop's own on
          every venue reconnect. *)
       Live.on_resync live ~f:(fun () -> Prepared.on_resync prepared ~now:(now ()));
+      let status_stop = Ivar.create () in
+      Option.iter cycle_monitor ~f:(fun monitor ->
+        Cycle_monitor.start monitor;
+        Time_source.every
+          time_source
+          ~stop:(Ivar.read status_stop)
+          ~continue_on_error:false
+          summary_interval
+          (fun () ->
+             Log.Global.info_s
+               [%message
+                 "status"
+                   ~async_cycles:
+                     (Cycle_monitor.Stats.to_string_hum (Cycle_monitor.stats monitor)
+                      : string)]));
       let finish ~reloads live =
+        Ivar.fill_if_empty status_stop ();
         let%bind report = Live.stop live in
+        Option.iter cycle_monitor ~f:Cycle_monitor.stop;
         let tick_to_order = Live.tick_to_order live in
         let%map () = shutdown () in
         Ok
@@ -223,6 +244,7 @@ module Make (V : Mm_core.Venue.S) = struct
           ; tick_to_order
           ; reloads
           ; shadow = Option.map shadow ~f:(fun s -> Shadow.stats s.shadow)
+          ; cycles = Option.map cycle_monitor ~f:Cycle_monitor.stats
           }
       in
       let reload_shadow ~live ~live_changed =

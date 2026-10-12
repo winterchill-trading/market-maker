@@ -76,6 +76,7 @@ module type RUNNER = sig
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> ?strategy_log:string
     -> ?order_log:string
+    -> ?cycle_monitor:Cycle_monitor.t
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t
@@ -180,6 +181,7 @@ let hyperliquid ?base_url ?address ?(allow_mainnet = false) ~getenv ~network () 
       ?shadow_params
       ?strategy_log
       ?order_log
+      ?cycle_monitor
       =
       Hyperliquid_live.connect_and_run
         ?time_source
@@ -187,6 +189,7 @@ let hyperliquid ?base_url ?address ?(allow_mainnet = false) ~getenv ~network () 
         ?shadow_params
         ?strategy_log
         ?order_log:(order_log_spec ~venue order_log)
+        ?cycle_monitor
         handle
     ;;
   end : RUNNER)
@@ -242,6 +245,7 @@ let binance ?base_url ~getenv ~network () =
       ?shadow_params
       ?strategy_log
       ?order_log
+      ?cycle_monitor
       =
       Binance_live.connect_and_run
         ?time_source
@@ -249,6 +253,7 @@ let binance ?base_url ~getenv ~network () =
         ?shadow_params
         ?strategy_log
         ?order_log:(order_log_spec ~venue order_log)
+        ?cycle_monitor
         config
     ;;
   end : RUNNER)
@@ -286,6 +291,7 @@ let bybit ?base_url ~getenv ~network () =
       ?shadow_params
       ?strategy_log
       ?order_log
+      ?cycle_monitor
       =
       Bybit_live.connect_and_run
         ?time_source
@@ -293,6 +299,7 @@ let bybit ?base_url ~getenv ~network () =
         ?shadow_params
         ?strategy_log
         ?order_log:(order_log_spec ~venue order_log)
+        ?cycle_monitor
         config
     ;;
   end : RUNNER)

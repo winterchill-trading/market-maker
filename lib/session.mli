@@ -21,11 +21,12 @@ module Outcome : sig
         a book update *)
     ; reloads : int (** parameter changes applied *)
     ; shadow : Shadow.Stats.t option (** with [shadow_params] *)
+    ; cycles : Cycle_monitor.Stats.t option (** with [cycle_monitor] *)
     }
   [@@deriving sexp_of]
 
-  (** The live report followed by a [tick-to-order] line (and [params reloads] and
-      [shadow plans] lines after reloads and with a shadow). *)
+  (** The live report, an [async cycles] line with a cycle monitor, a [tick-to-order]
+      line, and [params reloads] and [shadow plans] lines after reloads and with a shadow. *)
   val to_string_hum : t -> string
 end
 
@@ -58,6 +59,7 @@ module Make (V : Mm_core.Venue.S) : sig
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> ?strategy_log:string
     -> ?order_log:Order_log.Spec.t
+    -> ?cycle_monitor:Cycle_monitor.t
     -> V.config
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)

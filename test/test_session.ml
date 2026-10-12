@@ -457,3 +457,51 @@ let%expect_test "the order log of a session: places, acks, a fill, the final can
     |}];
   return ()
 ;;
+
+let%expect_test "a cycle monitor: status lines and the long cycles in the outcome" =
+  let statuses = ref 0 in
+  Log.Global.set_output
+    [ Log.Output.create
+        ~flush:(fun () -> return ())
+        (fun messages ->
+          Queue.iter messages ~f:(fun m ->
+            if String.is_prefix (Log.Message.message m) ~prefix:"(status"
+            then incr statuses);
+          return ())
+    ];
+  let time_source = Time_source.create ~now:Session_helpers.start_time () in
+  let venue = Fake_venue.create ~time_source:(Time_source.read_only time_source) () in
+  Fake_venue.push_book venue ~bid:"99990" ~ask:"100010";
+  let stop = Ivar.create () in
+  let outcome =
+    Session.connect_and_run
+      ~time_source:(Time_source.read_only time_source)
+      ~cycle_monitor:(Market_maker.Cycle_monitor.create ())
+      venue
+      ~symbol:Fake_venue.btc
+      ~params:(fun instrument ~mid -> Ok (Mm_core.Params.for_instrument instrument ~mid))
+      ~summary_interval:(Time_ns.Span.of_int_sec 1)
+      ~stop:(Ivar.read stop)
+  in
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 500) in
+  (* One job that holds the scheduler for 60 ms. *)
+  ignore (Core_unix.nanosleep 0.06 : float);
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_sec 2.6) in
+  Ivar.fill_exn stop ();
+  let%bind outcome = Session_helpers.advance_until time_source outcome in
+  let%bind () = Log.Global.flushed () in
+  let outcome = ok_exn outcome in
+  let cycles = Option.value_exn outcome.cycles in
+  print_s
+    [%message
+      ""
+        ~status_lines:(!statuses : int)
+        ~over_50ms:(cycles.over_count >= 1 : bool)
+        ~report_line:
+          (List.exists
+             (String.split_lines (Market_maker.Session.Outcome.to_string_hum outcome))
+             ~f:(String.is_prefix ~prefix:"async cycles     ")
+           : bool)];
+  [%expect {| ((status_lines 4) (over_50ms true) (report_line true)) |}];
+  return ()
+;;
