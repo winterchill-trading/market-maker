@@ -22,6 +22,9 @@ module Event : sig
     | Update_params of Mm_core.Params.t
     (** a reload: [Mm_core.Strategy.update_params] on the running strategy *)
     | Input of Strategy_input.t
+    | Resync of { now : int }
+    (** a venue reconnect: [Mm_core.Strategy.on_resync] at [now] (nanoseconds since the
+        epoch), which starts the action rate grace period *)
     | Tick of
         { now : int (** nanoseconds since the epoch *)
         ; plan : Mm_core.Action.t list
@@ -39,6 +42,14 @@ val of_writer : (Event.t -> unit) -> params:Mm_core.Params.t -> t
 
 (** Logs [input], feeds it to the mirror, ticks at [now] and logs the plan. *)
 val on_input : t -> Strategy_input.t -> now:int -> unit
+
+(** Starts the mirror's action rate grace period at [now] as the live loop does on a venue
+    reconnect ([Mm_core.Strategy.on_resync]) and logs a [Resync] line, so the requote
+    burst that follows replays to the same plans. *)
+val on_resync : t -> now:int -> unit
+
+(** The mirror's mode. *)
+val mode : t -> Mm_core.Strategy.Mode.t
 
 (** Swaps the mirror's parameters as the live loop does on a reload
     ([Mm_core.Strategy.update_params]) and logs an [Update_params] line. Errors, logging
@@ -67,7 +78,8 @@ module Replay : sig
   [@@deriving sexp_of]
 
   (** Runs the events through a fresh [Mm_core.Strategy] (a new one at every [Params],
-      updated in place at every [Update_params]) and compares each tick's plan with the
-      logged one. Fails when the log does not start with [Params]. *)
+      updated in place at every [Update_params], resynced at every [Resync]) and compares
+      each tick's plan with the logged one. Fails when the log does not start with
+      [Params]. *)
   val run : Event.t list -> t Or_error.t
 end
