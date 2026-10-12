@@ -1,0 +1,18 @@
+(library
+ (name market_maker)
+ (public_name market-maker)
+ (libraries
+  core
+  async
+  uri
+  exchange-core
+  mm-core
+  hl-protocol
+  hl-client
+  hl-mm
+  binance-protocol
+  binance-client
+  bybit-protocol
+  bybit-client)
+ (preprocess
+  (pps ppx_jane)))
