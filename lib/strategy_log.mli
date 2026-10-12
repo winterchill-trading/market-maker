@@ -37,6 +37,9 @@ type t
 (** Creates (truncates) the file and writes the [Params] line. *)
 val create : string -> params:Mm_core.Params.t -> t Deferred.t
 
+(** As [create], on an open writer (the log owns it from here: [close] closes it). *)
+val of_file_writer : Writer.t -> params:Mm_core.Params.t -> t
+
 (** For tests and other sinks: [write] receives every event. *)
 val of_writer : (Event.t -> unit) -> params:Mm_core.Params.t -> t
 

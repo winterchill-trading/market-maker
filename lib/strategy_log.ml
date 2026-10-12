@@ -27,14 +27,18 @@ let of_writer' write ~close ~params =
 
 let of_writer write ~params = of_writer' write ~close:(fun () -> return ()) ~params
 
-let create path ~params =
-  let%map writer = Writer.open_file path in
+let of_file_writer writer ~params =
   of_writer'
     (fun event ->
       Writer.write_sexp writer (Event.sexp_of_t event);
       Writer.newline writer)
     ~close:(fun () -> Writer.close writer)
     ~params
+;;
+
+let create path ~params =
+  let%map writer = Writer.open_file path in
+  of_file_writer writer ~params
 ;;
 
 let on_input t input ~now =
