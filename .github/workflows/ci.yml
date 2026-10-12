@@ -25,5 +25,8 @@ jobs:
             binance-client https://github.com/winterchill-trading/binance-client.git
             bybit-protocol https://github.com/winterchill-trading/bybit-protocol.git
             bybit-client https://github.com/winterchill-trading/bybit-client.git
+      # An exact ox-setup cache hit restores the switch without its system packages;
+      # hl-client links against the system libsecp256k1.
+      - run: sudo apt-get install -y libsecp256k1-dev
       - run: opam exec -- dune build
       - run: opam exec -- dune test
