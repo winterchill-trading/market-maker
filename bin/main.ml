@@ -37,13 +37,22 @@ let params_for
       ; base_half_spread_bps =
           Option.value half_spread_bps ~default:base.base_half_spread_bps
       ; skew_bps = Option.value skew_bps ~default:base.skew_bps
-      ; requote_interval_ms = Option.value requote_ms ~default:base.requote_interval_ms
+      ; requote_interval_ms =
+          Option.value_map
+            requote_ms
+            ~f:Time_ns.Span.of_int_ms
+            ~default:base.requote_interval_ms
       ; max_actions_per_sec =
           Option.value max_actions_per_sec ~default:base.max_actions_per_sec
       ; action_rate_grace_ms =
-          Option.value action_rate_grace_ms ~default:base.action_rate_grace_ms
+          Option.value_map
+            action_rate_grace_ms
+            ~f:Time_ns.Span.of_int_ms
+            ~default:base.action_rate_grace_ms
       ; action_rate_cooldown_ms =
-          Option.first_some action_rate_cooldown_ms base.action_rate_cooldown_ms
+          Option.first_some
+            (Option.map action_rate_cooldown_ms ~f:Time_ns.Span.of_int_ms)
+            base.action_rate_cooldown_ms
       }
     in
     match params_file with
