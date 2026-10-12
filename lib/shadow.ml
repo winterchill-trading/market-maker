@@ -53,6 +53,8 @@ module Stats = struct
   type t =
     { plans : int
     ; differing : int
+    ; live_mode : Mm_core.Strategy.Mode.t
+    ; shadow_mode : Mm_core.Strategy.Mode.t
     }
   [@@deriving sexp_of]
 end
@@ -111,4 +113,11 @@ let on_resync t ~now =
 
 let live_mode t = Mm_core.Strategy.mode t.live
 let shadow_mode t = Mm_core.Strategy.mode t.shadow
-let stats t = { Stats.plans = t.plans; differing = t.differing }
+
+let stats t =
+  { Stats.plans = t.plans
+  ; differing = t.differing
+  ; live_mode = live_mode t
+  ; shadow_mode = shadow_mode t
+  }
+;;

@@ -54,7 +54,7 @@ let%expect_test "same parameters never differ" =
     -- book at 0ms
     -- open orders at 10ms
     -- book at 1500ms
-    ((plans 2) (differing 0))
+    ((plans 2) (differing 0) (live_mode Running) (shadow_mode Running))
     |}];
   return ()
 ;;
@@ -70,7 +70,7 @@ let%expect_test "a wider, shorter ladder" =
     -- book at 1500ms
     live   cancel 0, keep 0, place [buy 0.001@99819 buy 0.001@99799 buy 0.001@99779 sell 0.001@100381 sell 0.001@100401 sell 0.001@100421]
     shadow cancel 0, keep 0, place [buy 0.001@99799 sell 0.001@100401]
-    ((plans 2) (differing 2))
+    ((plans 2) (differing 2) (live_mode Running) (shadow_mode Running))
     |}];
   return ()
 ;;
@@ -96,7 +96,7 @@ let%expect_test "updating the shadow to the live parameters keeps its state" =
     shadow cancel 0, keep 0, place [buy 0.001@99970 sell 0.001@100030]
     (Ok ())
     (Error ("invalid params" (errors ("levels must be in [1, 255]"))))
-    ((plans 2) (differing 1))
+    ((plans 2) (differing 1) (live_mode Running) (shadow_mode Running))
     |}];
   return ()
 ;;

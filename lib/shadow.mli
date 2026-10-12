@@ -31,6 +31,8 @@ module Stats : sig
   type t =
     { plans : int (** ticks where at least one of the two planned something *)
     ; differing : int
+    ; live_mode : Mm_core.Strategy.Mode.t (** of the mirror of the live strategy *)
+    ; shadow_mode : Mm_core.Strategy.Mode.t
     }
   [@@deriving sexp_of]
 end
