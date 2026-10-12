@@ -244,3 +244,68 @@ let%expect_test "the strategy log of a session replays to the same plans" =
     |}];
   return ()
 ;;
+
+let%expect_test "a reload mid-run moves the quotes without a cancel-all" =
+  let time_source = Time_source.create ~now:Session_helpers.start_time () in
+  let venue = Fake_venue.create ~time_source:(Time_source.read_only time_source) () in
+  Fake_venue.push_book venue ~bid:"99990" ~ask:"100010";
+  let spread = ref 3 in
+  let params instrument ~mid =
+    Ok
+      { (Mm_core.Params.for_instrument instrument ~mid) with
+        levels = 1
+      ; base_half_spread_bps = Float.of_int !spread
+      }
+  in
+  let reload_r, reload_w = Pipe.create () in
+  let stop = Ivar.create () in
+  (* Only the lines that would show a restart or a cancel-all, and the reload itself. *)
+  let lines = Queue.create () in
+  Log.Global.set_output
+    [ Log.Output.create
+        ~flush:(fun () -> return ())
+        (fun messages ->
+          Queue.iter messages ~f:(fun m -> Queue.enqueue lines (Log.Message.message m));
+          return ())
+    ];
+  let outcome =
+    Session.connect_and_run
+      ~time_source:(Time_source.read_only time_source)
+      ~reload:reload_r
+      venue
+      ~symbol:Fake_venue.btc
+      ~params
+      ~summary_interval:(Time_ns.Span.of_int_sec 60)
+      ~stop:(Ivar.read stop)
+  in
+  let quotes () =
+    List.map (Fake_venue.resting venue) ~f:(fun o -> Exchange_core.Price.to_string o.px)
+    |> List.sort ~compare:String.compare
+  in
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 500) in
+  let before = quotes () in
+  spread := 10;
+  Pipe.write_without_pushback reload_w ();
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 500) in
+  let after = quotes () in
+  let%bind () = Log.Global.flushed () in
+  let during_run = Queue.to_list lines in
+  Ivar.fill_exn stop ();
+  let%bind outcome = Session_helpers.advance_until time_source outcome in
+  let outcome = ok_exn outcome in
+  let mentions word = List.exists during_run ~f:(String.is_substring ~substring:word) in
+  print_s
+    [%message
+      (before : string list)
+        (after : string list)
+        (outcome.reloads : int)
+        ~restarted:(mentions "starting" && mentions "stopping" : bool)
+        ~cancel_all:(mentions "shutdown" : bool)
+        ~reloaded:(mentions "params reloaded" : bool)];
+  [%expect
+    {|
+    ((before (100030 99970)) (after (100100 99900)) (outcome.reloads 1)
+     (restarted false) (cancel_all false) (reloaded true))
+    |}];
+  return ()
+;;
