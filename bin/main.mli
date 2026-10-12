@@ -1,0 +1,1 @@
+(* An executable: no interface. *)

@@ -1,0 +1,16 @@
+; The main module is [main] rather than [market_maker] so that it does not clash with
+; the [market_maker] library's wrapper module.
+
+(executable
+ (name main)
+ (public_name market-maker)
+ (libraries
+  async
+  core
+  core_unix.command_unix
+  exchange-core
+  market-maker
+  mm-core
+  uri)
+ (preprocess
+  (pps ppx_jane)))
