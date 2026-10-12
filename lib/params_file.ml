@@ -19,8 +19,9 @@ let field_names =
   lazy
     (let probe =
        { Mm_core.Params.btc with
-         action_rate_grace_ms = Mm_core.Params.btc.action_rate_grace_ms + 1
-       ; action_rate_cooldown_ms = Some 1
+         action_rate_grace_ms =
+           Time_ns.Span.(Mm_core.Params.btc.action_rate_grace_ms + millisecond)
+       ; action_rate_cooldown_ms = Some Time_ns.Span.millisecond
        }
      in
      match Mm_core.Params.sexp_of_t probe with
