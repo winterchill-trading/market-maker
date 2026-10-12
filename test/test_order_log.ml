@@ -81,3 +81,26 @@ let%expect_test "one row per order, quoted where needed" =
     |}];
   return ()
 ;;
+
+let%expect_test "parse_line reads back what rows writes" =
+  let rows =
+    Order_log.rows
+      ~venue:"binance"
+      ~local_ts:1_000
+      (Placed
+         { requests = [ request Buy "99990" ]
+         ; result = Error (Error.of_string "timeout, \"retry\"")
+         })
+  in
+  List.iter rows ~f:(fun row -> print_s [%sexp (Order_log.parse_line row : string list)]);
+  print_s [%sexp (Order_log.parse_line Order_log.header |> List.length : int)];
+  print_s [%sexp (Order_log.parse_line ",," : string list)];
+  [%expect
+    {|
+    (1000 "" binance BTCUSDT ack buy 99990 0.002 "" c1 error "" ""
+     "timeout, \"retry\"")
+    14
+    ("" "" "")
+    |}];
+  return ()
+;;

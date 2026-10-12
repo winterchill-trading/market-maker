@@ -223,6 +223,36 @@ let rows ~venue ~local_ts event =
   List.map (event_rows event) ~f:(Row.to_csv ~venue ~local_ts)
 ;;
 
+let parse_line line =
+  let fields = ref [] in
+  let field = Buffer.create 32 in
+  let finish () =
+    fields := Buffer.contents field :: !fields;
+    Buffer.clear field
+  in
+  let n = String.length line in
+  (* [quoted]: inside a quoted field. *)
+  let rec loop i ~quoted =
+    if i >= n
+    then finish ()
+    else (
+      match line.[i], quoted with
+      | '"', true when i + 1 < n && Char.equal line.[i + 1] '"' ->
+        Buffer.add_char field '"';
+        loop (i + 2) ~quoted
+      | '"', true -> loop (i + 1) ~quoted:false
+      | '"', false when Buffer.length field = 0 -> loop (i + 1) ~quoted:true
+      | ',', false ->
+        finish ();
+        loop (i + 1) ~quoted
+      | c, _ ->
+        Buffer.add_char field c;
+        loop (i + 1) ~quoted)
+  in
+  loop 0 ~quoted:false;
+  List.rev !fields
+;;
+
 let create writer ~venue ~now =
   Writer.write_line writer header;
   { writer; venue; now }

@@ -37,6 +37,9 @@ val header : string
 (** The CSV rows of one event, without line endings. *)
 val rows : venue:string -> local_ts:int -> Order_event.t -> string list
 
+(** Splits one row back into its fields (RFC 4180 quoting, as the writer produces). *)
+val parse_line : string -> string list
+
 (** Writes the header. [now] stamps each event. *)
 val create : Writer.t -> venue:string -> now:(unit -> int) -> t
 
