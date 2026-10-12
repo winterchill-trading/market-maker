@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: shellcheck scripts/*.sh
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: ocaml-variants.5.2.0+ox
@@ -27,6 +28,7 @@ jobs:
       - run: opam pin add -y -n binance-client https://github.com/winterchill-trading/binance-client.git
       - run: opam pin add -y -n bybit-protocol https://github.com/winterchill-trading/bybit-protocol.git
       - run: opam pin add -y -n bybit-client https://github.com/winterchill-trading/bybit-client.git
+      - run: opam pin list
       - run: opam install . --deps-only --with-test
       - run: opam exec -- dune build
       - run: opam exec -- dune test
