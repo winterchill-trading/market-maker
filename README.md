@@ -233,6 +233,30 @@ binance,BTCUSDT,3,2,1,0.5,0.0
 venue numbers private executions apart from public trades, the match falls back to
 price and time.
 
+### Status viewer (prototype)
+
+`market-maker-status ORDER_LOG` is a terminal viewer built with
+[Bonsai_term](https://github.com/janestreet/bonsai_term): it tails an order log (every
+`-refresh-ms`, 250) and shows the resting orders, position, volume and fees from the
+fills, counts per event, the request to answer latency and the latest fills; `q` quits.
+It reads only the file, so it runs next to a live maker or on a finished run's log;
+`-once` prints the same text and exits. On the 15 s binance-sim log above:
+
+```
+binance BTCUSDT  last row 438.5s ago
+position -0.004  volume 5606.067 USD  fees 1.1212134 USD
+place 116  ack 116  cancel 100  fill 28  update 232
+ack latency median 0.62ms max 13.61ms (last 116)
+resting orders (0)
+recent fills
+  439.2s ago  buy  0.002 @ 100136.2
+  ...
+```
+
+The fold is `Market_maker.Order_log_status` (tested with the library). The executable is
+`(optional)` in dune: it is built only where `bonsai_term` is installed (it is on the
+OxCaml switch, but it is not a dependency of the opam package, so CI skips it).
+
 ### Mirrors and reconnects
 
 The shadow and the strategy log attach to the venue in the `on_venue` hook of
@@ -283,8 +307,9 @@ The other modules:
 - `Params_file`: `apply` and `load` for the override files.
 - `Shadow`: the shadow strategy and its plan comparison.
 - `Strategy_input`, `Strategy_log`: the logged events, writer, loader and replay.
-- `Order_event`, `Order_log`: the order lifecycle the venue wrapper observes and its CSV
-  writer.
+- `Order_event`, `Order_log`: the order lifecycle the venue wrapper observes, its CSV
+  writer and row parser; `Order_log_status`: the summary the status viewer shows.
+- `Cycle_monitor`: long Async cycles, counted and logged.
 
 ## End-to-end runs
 
@@ -457,5 +482,17 @@ the reconnect's grace period). A signed Hyperliquid run (`HL_PRIVATE_KEY` set to
 throwaway key) quotes on an in-process hl-sim whose clock is the test's synthetic one; the
 test recovers the signer of every journalled request: the maker's orders and cancels are
 signed by the key, for the key's account. `Params_file`, `Shadow`,
-`Strategy_log` and `Restartable_venue` have their own tests. The adapters' own test
+`Strategy_log`, `Restartable_venue`, `Order_log`, `Order_log_status` and `Cycle_monitor`
+have their own tests; a session writes an order log (places, acks, a fill, the final
+cancel-all) and counts a cycle that blocks the scheduler for 60 ms;
+`queries/fills_vs_trades.sql` runs through the `duckdb` CLI (CI installs it).
+
+### Nightly
+
+`.github/workflows/nightly.yml` builds and tests against the current `main` of every pin
+each night (the push CI does the same, but only when this repository changes), and on
+Mondays runs `scripts/e2e-all.sh 30` in a workspace of this checkout and the three
+simulators (the other siblings come from the pinned switch). The latency and long cycle
+tables go to the job summary and, with every log and report, to an `e2e-all-<run id>`
+artifact kept for 30 days. `workflow_dispatch` runs both. The adapters' own test
 suites run the strategy on each simulator.
