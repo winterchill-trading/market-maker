@@ -16,6 +16,11 @@
 # (5.2.0+ox), DUNE_BUILD_DIR (<root>/_build-market-maker), SEED (42), PORT (a free port),
 # LOG_DIR (a temporary directory). The final report is also written to
 # LOG_DIR/report.txt.
+#
+# Fault injection: with FAULT_AT=SECONDS the simulator is killed that long into the run,
+# kept down for FAULT_DOWN seconds (default 3) and restarted on the same port with the
+# same seed; the run then fails unless the maker reconnected, resynchronised and placed
+# orders again, and ended in the Running mode.
 set -euo pipefail
 
 usage() {
@@ -52,6 +57,8 @@ fi
 switch="${OPAM_SWITCH:-5.2.0+ox}"
 export DUNE_BUILD_DIR="${DUNE_BUILD_DIR:-$root/_build-market-maker}"
 seed="${SEED:-42}"
+fault_at="${FAULT_AT:-}"
+fault_down="${FAULT_DOWN:-3}"
 log_dir="${LOG_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/market-maker-e2e.XXXXXX")}"
 mkdir -p "$log_dir"
 
@@ -82,27 +89,31 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-echo "e2e: starting $sim on port $port (seed $seed), log $log_dir/sim.log" >&2
-"$sim_exe" -port "$port" -seed "$seed" >"$log_dir/sim.log" 2>&1 &
-sim_pid=$!
-
-ready=""
-for _ in $(seq 1 100); do
-  if "${probe[@]}" >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
-  if ! kill -0 "$sim_pid" 2>/dev/null; then
-    echo "e2e: $sim exited early:" >&2
-    cat "$log_dir/sim.log" >&2
+start_sim() {
+  local log="$1"
+  echo "e2e: starting $sim on port $port (seed $seed), log $log" >&2
+  "$sim_exe" -port "$port" -seed "$seed" >"$log" 2>&1 &
+  sim_pid=$!
+  local ready=""
+  for _ in $(seq 1 100); do
+    if "${probe[@]}" >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$sim_pid" 2>/dev/null; then
+      echo "e2e: $sim exited early:" >&2
+      cat "$log" >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+  if [[ -z "$ready" ]]; then
+    echo "e2e: $sim did not answer on $base_url" >&2
     exit 1
   fi
-  sleep 0.2
-done
-if [[ -z "$ready" ]]; then
-  echo "e2e: $sim did not answer on $base_url" >&2
-  exit 1
-fi
+}
+
+start_sim "$log_dir/sim.log"
 # Let the noise traders build a two-sided book.
 sleep 2
 
@@ -110,6 +121,22 @@ echo "e2e: running market-maker on $venue for ${run_for}s, log $log_dir/mm.log" 
 "$mm_exe" -venue "$venue" -network local -base-url "$base_url" -run-for "$run_for" "$@" \
   >"$log_dir/report.txt" 2>"$log_dir/mm.log" &
 mm_pid=$!
+
+# Fault phase: kill the simulator FAULT_AT seconds in, keep it down for FAULT_DOWN
+# seconds and restart it on the same port. The checks below read the log from the kill on.
+fault_line=""
+if [[ -n "$fault_at" ]]; then
+  sleep "$fault_at"
+  echo "e2e: fault: stopping $sim for ${fault_down}s" >&2
+  fault_line="$(wc -l <"$log_dir/mm.log")"
+  kill "$sim_pid"
+  wait "$sim_pid" 2>/dev/null || true
+  sim_pid=""
+  sleep "$fault_down"
+  start_sim "$log_dir/sim-restarted.log"
+  echo "e2e: fault: $sim is back" >&2
+fi
+
 status=0
 wait "$mm_pid" || status=$?
 mm_pid=""
@@ -117,6 +144,28 @@ cat "$log_dir/report.txt"
 if [[ $status -ne 0 ]]; then
   echo "e2e: market-maker exited with $status; last log lines:" >&2
   tail -20 "$log_dir/mm.log" >&2
+fi
+
+# After a fault the maker must have reconnected and placed quotes again.
+if [[ -n "$fault_line" && $status -eq 0 ]]; then
+  reconnects="$(sed -n 's/^reconnects *//p' "$log_dir/report.txt")"
+  after="$(tail -n "+$((fault_line + 1))" "$log_dir/mm.log")"
+  check() {
+    if [[ "$2" == ok ]]; then
+      echo "e2e: fault check passed: $1" >&2
+    else
+      echo "e2e: fault check FAILED: $1" >&2
+      status=1
+    fi
+  }
+  check "reconnects >= 1 (got ${reconnects:-none})" \
+    "$([[ "${reconnects:-0}" -ge 1 ]] && echo ok)"
+  check "resynced after the restart" \
+    "$(grep -q 'venue reconnected' <<<"$after" && echo ok)"
+  check "placed orders after the restart" \
+    "$(grep -q 'place \[[a-z]' <<<"$after" && echo ok)"
+  check "still Running at the end" \
+    "$(grep -q '^mode  *Running' "$log_dir/report.txt" && echo ok)"
 fi
 echo "e2e: logs in $log_dir" >&2
 exit "$status"
