@@ -21,6 +21,14 @@
 # kept down for FAULT_DOWN seconds (default 3) and restarted on the same port with the
 # same seed; the run then fails unless the maker reconnected, resynchronised and placed
 # orders again, and ended in the Running mode.
+#
+# Signed run (Hyperliquid only): with SIGNED=1 market-maker gets HL_PRIVATE_KEY set to a
+# throwaway key (the secp256k1 secret 1, address 0x7e5f...5bdf) and signs every exchange
+# request, as it would on testnet; hl-sim journals the requests to LOG_DIR/journal.jsonl
+# and the run fails unless the maker reported a signed endpoint and its orders reached the
+# simulator signed, for the key's account. Without SIGNED=1, HL_PRIVATE_KEY and HL_ADDRESS
+# are cleared so the run stays unsigned. The script only ever talks to the local
+# simulator.
 set -euo pipefail
 
 usage() {
@@ -59,6 +67,19 @@ export DUNE_BUILD_DIR="${DUNE_BUILD_DIR:-$root/_build-market-maker}"
 seed="${SEED:-42}"
 fault_at="${FAULT_AT:-}"
 fault_down="${FAULT_DOWN:-3}"
+signed="${SIGNED:-}"
+if [[ -n "$signed" && "$venue" != hyperliquid ]]; then
+  echo "e2e: SIGNED=1 is for hyperliquid only" >&2
+  exit 2
+fi
+throwaway_account=0x7e5f4552091a69125d5dfcb7b8c2659029395bdf
+unset HL_ADDRESS
+if [[ -n "$signed" ]]; then
+  HL_PRIVATE_KEY="0x$(printf '%063d1' 0)"
+  export HL_PRIVATE_KEY
+else
+  unset HL_PRIVATE_KEY
+fi
 log_dir="${LOG_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/market-maker-e2e.XXXXXX")}"
 mkdir -p "$log_dir"
 
@@ -93,7 +114,9 @@ trap 'exit 130' INT TERM
 start_sim() {
   local log="$1"
   echo "e2e: starting $sim on port $port (seed $seed), log $log" >&2
-  "$sim_exe" -port "$port" -seed "$seed" >"$log" 2>&1 &
+  local journal=()
+  if [[ -n "$signed" ]]; then journal=(-journal "$log_dir/journal.jsonl"); fi
+  "$sim_exe" -port "$port" -seed "$seed" ${journal[@]+"${journal[@]}"} >"$log" 2>&1 &
   sim_pid=$!
   local ready=""
   for _ in $(seq 1 100); do
@@ -167,6 +190,19 @@ if [[ -n "$fault_line" && $status -eq 0 ]]; then
     "$(grep -q 'place \[[a-z]' <<<"$after" && echo ok)"
   check "still Running at the end" \
     "$(grep -q '^mode  *Running' "$log_dir/report.txt" && echo ok)"
+fi
+# A signed run must have signed every order for the throwaway key's account.
+if [[ -n "$signed" && $status -eq 0 ]]; then
+  journal_file="$log_dir/journal.jsonl"
+  orders="$(grep -c '"type":"order"' "$journal_file" || true)"
+  signed_orders="$(grep '"type":"order"' "$journal_file" | grep -c '"signature":' || true)"
+  ours="$(grep -c "\"address\":\"$throwaway_account\"" "$journal_file" || true)"
+  echo "e2e: signed: $signed_orders of $orders order requests signed, $ours for $throwaway_account" >&2
+  if ! grep -q 'signed for testnet' "$log_dir/mm.log" ||
+    [[ "${orders:-0}" -eq 0 || "$signed_orders" -ne "$orders" || "$ours" -eq 0 ]]; then
+    echo "e2e: signed check FAILED" >&2
+    status=1
+  fi
 fi
 echo "e2e: logs in $log_dir" >&2
 exit "$status"
