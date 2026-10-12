@@ -94,11 +94,13 @@ instrument defaults and the flags:
 
 `kill -HUP <pid>` reads the file again. Unknown or repeated fields, a different `symbol`
 and values that fail `Params.validate` are logged and the current parameters stay. Valid
-new parameters restart the live loop on the same connection: the old loop cancels its
-orders and reports, a new strategy starts from a fresh open-orders and account snapshot,
-and the final report adds up both. Quotes are off the book for one cancel-all and one
-snapshot, and the strategy's generation counter (part of client order ids) starts again
-at 1. A field removed from the file reverts to its default on the next reload.
+new parameters go to the running loop (`Mm_core.Live.update_params`): no restart and no
+cancel-all. The strategy keeps its market state, inventory, resting orders, generation
+counter and kill-switch history; the next tick requotes and the reconciler keeps the
+orders that still match the new ladder and replaces the rest. A changed
+`requote_interval_ms` re-arms the poll timer; a halted strategy stays halted. If the loop
+rejects the parameters (it is stopping, or they name another symbol) the error is logged
+and the current ones stay. A field removed from the file reverts to its default on the next reload.
 
 ### Shadow parameters
 
@@ -116,11 +118,11 @@ alone; both see the live orders in their open-orders snapshots.
 
 ### Strategy log
 
-`-strategy-log FILE` writes one sexp per line: a `Params` line at the start and at each
-reload, then every input (`(Input (Book ...))`, `Fill`, `Open_orders`, `Account`) and the
+`-strategy-log FILE` writes one sexp per line: a `Params` line at the start, an
+`Update_params` line at each reload, then every input (`(Input (Book ...))`, `Fill`, `Open_orders`, `Account`) and the
 tick after it with its plan (`(Tick (now <ns>) (plan (...)))`).
 `Market_maker.Strategy_log.load` and `Replay.run` feed it through a fresh
-`Mm_core.Strategy` and compare every plan: a 8 s Hyperliquid run logged 187 ticks and
+`Mm_core.Strategy` (updated in place at each `Update_params`) and compare every plan: a 8 s Hyperliquid run logged 187 ticks and
 17 plans (the live loop sent 19) and replayed with no mismatch. The ticks are a mirror's,
 one per input; the live loop coalesces ticks on its sequencer, so its plans can come at
 slightly different moments. Books make the file grow by about 20 KB a second.
@@ -157,7 +159,7 @@ The other modules:
   the number of reloads and the shadow counts.
 - `Restartable_venue.Make (V)`: a `Venue.S` whose `close` does nothing, so a live loop can
   stop and a new one start on the same connection (`next_loop`, `shutdown`); observers
-  see every value the strategy is fed.
+  see every value the strategy is fed (the shadow and the strategy log use them).
 - `Params_file`: `apply` and `load` for the override files.
 - `Shadow`: the shadow strategy and its plan comparison.
 - `Strategy_input`, `Strategy_log`: the logged events, writer, loader and replay.
