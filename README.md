@@ -253,9 +253,10 @@ recent fills
   ...
 ```
 
-The fold is `Market_maker.Order_log_status` (tested with the library). The executable is
-`(optional)` in dune: it is built only where `bonsai_term` is installed (it is on the
-OxCaml switch, but it is not a dependency of the opam package, so CI skips it).
+The fold is `Market_maker.Order_log_status` and the file follower `Order_log_tail`, both
+tested with the library. `bonsai_term` is on the OxCaml switch but is not a dependency of
+the opam package: a dune `select` builds the terminal view (`bin/status_tui.bonsai.ml`)
+where it is installed and a stub elsewhere (CI), where only `-once` works.
 
 ### Mirrors and reconnects
 
