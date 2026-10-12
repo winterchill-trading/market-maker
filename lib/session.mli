@@ -4,7 +4,10 @@
     A reload hands the new parameters to the running loop ([Mm_core.Live.update_params]):
     no restart and no cancel-all; the next tick requotes and the reconciler keeps the
     resting orders that still match. The venue is wrapped in {!Restartable_venue} so the
-    shadow strategy and the strategy log see the loop's inputs. *)
+    shadow strategy and the strategy log see the loop's inputs: they attach in the
+    [on_venue] hook of [Mm_core.Live.Make (V).connect_and_start], before the loop starts,
+    and start the same action rate grace period as the loop on every venue reconnect
+    ([Mm_core.Live.Make (V).on_resync]). *)
 
 open! Core
 open! Async
@@ -43,7 +46,8 @@ module Make (V : Mm_core.Venue.S) : sig
       shadow parameters.
 
       With [strategy_log], every strategy input and plan goes to that file as a
-      {!Strategy_log} (truncated at the start, a new [Params] line at each reload). *)
+      {!Strategy_log} (truncated before connecting, an [Update_params] line at each
+      reload, a [Resync] line at each venue reconnect). *)
   val connect_and_run
     :  ?time_source:Time_source.t
     -> ?reload:unit Pipe.Reader.t
