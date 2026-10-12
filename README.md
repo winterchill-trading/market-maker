@@ -494,5 +494,7 @@ each night (the push CI does the same, but only when this repository changes), a
 Mondays runs `scripts/e2e-all.sh 30` in a workspace of this checkout and the three
 simulators (the other siblings come from the pinned switch). The latency and long cycle
 tables go to the job summary and, with every log and report, to an `e2e-all-<run id>`
-artifact kept for 30 days. `workflow_dispatch` runs both. The adapters' own test
+artifact kept for 30 days. `workflow_dispatch` runs both. The first run (dispatched, 23 minutes
+with the switch build) passed on an `ubuntu-latest` runner: tick-to-order p50 46 to 48
+us, p99 458 us (hyperliquid) to 1.9 ms (bybit), no Async cycle over 20 ms. The adapters' own test
 suites run the strategy on each simulator.
