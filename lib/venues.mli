@@ -53,7 +53,8 @@ module type RUNNER = sig
 
   (** [Session.Make (V).connect_and_run] with the bound configuration. *)
   val connect_and_run
-    :  symbol:Symbol.t
+    :  ?reload:unit Pipe.Reader.t
+    -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t
     -> stop:unit Deferred.t
