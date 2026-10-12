@@ -74,3 +74,29 @@ let%expect_test "a wider, shorter ladder" =
     |}];
   return ()
 ;;
+
+let%expect_test "updating the shadow to the live parameters keeps its state" =
+  let live = Mm_core.Params.btc in
+  let shadow = { live with levels = 1 } in
+  let t = Shadow.create ~live ~shadow in
+  let feed at input =
+    Shadow.on_input t input ~now:(ms at) ~on_difference:print_difference
+  in
+  feed 0 (book ~time:0 ~bid:"99990" ~ask:"100010");
+  feed 10 (Strategy_input.Open_orders []);
+  print_s [%sexp (Shadow.update_params t ~live ~shadow:live : unit Or_error.t)];
+  print_s
+    [%sexp
+      (Shadow.update_params t ~live ~shadow:{ live with levels = 0 } : unit Or_error.t)];
+  feed 1500 (book ~time:1500 ~bid:"100090" ~ask:"100110");
+  print_s [%sexp (Shadow.stats t : Shadow.Stats.t)];
+  [%expect
+    {|
+    live   cancel 0, keep 0, place [buy 0.001@99970 buy 0.001@99950 buy 0.001@99930 sell 0.001@100030 sell 0.001@100050 sell 0.001@100070]
+    shadow cancel 0, keep 0, place [buy 0.001@99970 sell 0.001@100030]
+    (Ok ())
+    (Error ("invalid params" (errors ("levels must be in [1, 255]"))))
+    ((plans 2) (differing 1))
+    |}];
+  return ()
+;;

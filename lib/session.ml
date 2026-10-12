@@ -92,8 +92,8 @@ module Make (V : Mm_core.Venue.S) = struct
       { shadow; params; current }
     ;;
 
-    (* Re-reads the shadow parameters; restarts the shadow when they or the live ones
-       changed. *)
+    (* Re-reads the shadow parameters; updates both shadow strategies in place when they
+       or the live ones changed. *)
     let reload t ~live ~live_changed ~instrument ~mid =
       let next =
         match Or_error.try_with_join (fun () -> t.params instrument ~mid) with
@@ -112,8 +112,12 @@ module Make (V : Mm_core.Venue.S) = struct
             [%message
               "shadow params reloaded"
                 ~changes:(changed_fields t.current next : Sexp.t list)];
-        t.current <- next;
-        Shadow.restart t.shadow ~live ~shadow:next)
+        match Shadow.update_params t.shadow ~live ~shadow:next with
+        | Ok () -> t.current <- next
+        | Error error ->
+          Log.Global.error_s
+            [%message
+              "shadow params update failed, keeping the current ones" (error : Error.t)])
     ;;
   end
 

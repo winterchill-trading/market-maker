@@ -39,9 +39,14 @@ type t
 
 val create : live:Mm_core.Params.t -> shadow:Mm_core.Params.t -> t
 
-(** Starts both strategies again from scratch (after a parameter reload); the counts carry
-    on. *)
-val restart : t -> live:Mm_core.Params.t -> shadow:Mm_core.Params.t -> unit
+(** Swaps the parameters of both strategies in place ([Mm_core.Strategy.update_params]),
+    as the live loop does on a reload: market state, inventory and resting orders carry
+    on, and so do the counts. Errors, changing nothing, if either is rejected. *)
+val update_params
+  :  t
+  -> live:Mm_core.Params.t
+  -> shadow:Mm_core.Params.t
+  -> unit Or_error.t
 
 (** Feeds [input] to both strategies, ticks both at [now] (nanoseconds since the epoch),
     and calls [on_difference] (default: log at info level) when their plans differ. *)

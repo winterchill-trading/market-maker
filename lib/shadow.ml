@@ -72,9 +72,12 @@ let create ~live ~shadow =
   }
 ;;
 
-let restart t ~live ~shadow =
-  t.live <- Mm_core.Strategy.create live;
-  t.shadow <- Mm_core.Strategy.create shadow
+let update_params t ~live ~shadow =
+  let open Or_error.Let_syntax in
+  let%bind next_live = Mm_core.Strategy.update_params t.live live in
+  let%map next_shadow = Mm_core.Strategy.update_params t.shadow shadow in
+  t.live <- next_live;
+  t.shadow <- next_shadow
 ;;
 
 let log_difference ~live ~shadow =
