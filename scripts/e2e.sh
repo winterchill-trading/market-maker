@@ -78,7 +78,7 @@ esac
 
 sim_pid=""
 mm_pid=""
-# shellcheck disable=SC2329 # invoked by the EXIT trap
+# shellcheck disable=SC2317,SC2329 # invoked by the EXIT trap
 cleanup() {
   for pid in "$mm_pid" "$sim_pid"; do
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then

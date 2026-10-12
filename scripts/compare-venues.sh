@@ -24,7 +24,7 @@ echo "compare: building the simulators and venue_script (switch $switch)" >&2
 build="$DUNE_BUILD_DIR/default"
 
 sim_pid=""
-# shellcheck disable=SC2329 # invoked by the EXIT trap
+# shellcheck disable=SC2317,SC2329 # invoked by the EXIT trap
 cleanup() {
   if [[ -n "$sim_pid" ]] && kill -0 "$sim_pid" 2>/dev/null; then
     kill "$sim_pid" 2>/dev/null || true
