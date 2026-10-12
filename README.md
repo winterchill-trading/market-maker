@@ -103,6 +103,23 @@ order, prints the report and exits; the position is not flattened. The report en
 the tick-to-order latency: from a book update to the plan it led to being sent
 (`mm-core`'s histogram, two significant digits).
 
+### Long Async cycles
+
+Every job in the process (book handling, planning, JSON decoding, the shadow and the
+logs) runs on one Async scheduler, so a long cycle delays the next requote by its whole
+length. The binary watches the scheduler (`Cycle_monitor`, over `Scheduler.long_cycles`):
+a cycle over 20 ms is logged as `("warning: long async cycle" (cycle 23ms) (over 20ms))`,
+cycles over 20 ms and over 50 ms are counted, a `(status (async_cycles "..."))` line
+repeats the counts every `-summary-secs`, and the report has them:
+
+```
+async cycles     0 over 50ms, 0 over 20ms, max -
+```
+
+A 30 s `scripts/e2e-all.sh` run (which now ends with a long cycles table) had none on any
+venue, fault run included; tick-to-order p50 29 to 31 us, p99 615 us (fault-binance) to
+42 ms (bybit, a book that waited for a plan in flight, not a long cycle).
+
 ### Parameter files and SIGHUP
 
 `-params FILE` holds overrides of any `Mm_core.Params.t` field by name, applied over the
