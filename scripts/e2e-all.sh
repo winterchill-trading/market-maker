@@ -10,6 +10,9 @@
 # 100 actions per second (a sticky halt), so this run raises it with
 # -max-actions-per-sec 1000.
 #
+# Starts by printing the commit each sibling checkout in the workspace is at (WORKSPACE,
+# default the parent of this checkout), marked "+dirty" with uncommitted changes.
+#
 # Ends with each venue's tick-to-order latency (book update to plan sent). Logs go to
 # LOG_DIR/<venue> and LOG_DIR/fault-<venue> (LOG_DIR defaults to a temporary directory).
 set -euo pipefail
@@ -18,6 +21,23 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log_root="${LOG_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/market-maker-e2e-all.XXXXXX")}"
 venues=(hyperliquid binance bybit)
 failed=()
+
+workspace="${WORKSPACE:-$(cd "$here/../.." && pwd)}"
+echo "--- workspace $workspace ---"
+for repo in market-maker fixed-decimal exchange-core parquet market-data hl-protocol \
+  order-book venue-net hl-client hl-sim mm-core hl-mm binance-protocol binance-sim \
+  binance-client bybit-protocol bybit-sim bybit-client; do
+  dir="$workspace/$repo"
+  if [[ ! -d "$dir" ]]; then
+    head="missing"
+  elif head="$(git -C "$dir" log -1 --format='%h %cs %s' 2>/dev/null)"; then
+    [[ -z "$(git -C "$dir" status --porcelain --untracked-files=no)" ]] || head="$head +dirty"
+  else
+    head="not a git checkout"
+  fi
+  printf '%-17s %s\n' "$repo" "$head"
+done
+
 for venue in "${venues[@]}"; do
   echo "=== $venue ===" >&2
   LOG_DIR="$log_root/$venue" "$here/e2e.sh" "$venue" "$@" || failed+=("$venue")
