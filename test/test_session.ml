@@ -414,6 +414,12 @@ let%expect_test "the order log of a session: places, acks, a fill, the final can
       ~summary_interval:(Time_ns.Span.of_int_sec 60)
       ~stop:(Ivar.read stop)
   in
+  (* Opening the log file runs in a thread, outside the synthetic clock: wait on the wall
+     clock for the first quotes before driving the session. *)
+  let%bind () =
+    Session_helpers.wait_until ~what:"first quotes" (fun () ->
+      not (List.is_empty (Fake_venue.resting venue)))
+  in
   let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 500) in
   Fake_venue.fill_best venue Buy;
   let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 100) in
