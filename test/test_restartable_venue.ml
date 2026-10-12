@@ -83,3 +83,45 @@ let%expect_test "observers see what the strategy is fed" =
     |}];
   V.shutdown t
 ;;
+
+let%expect_test "order observers see requests, answers, updates and fills" =
+  let fake = Fake_venue.create () in
+  let%bind t = V.connect fake >>| ok_exn in
+  V.add_order_observer t (fun event -> print_s [%sexp (event : Order_event.t)]);
+  let%bind _ =
+    V.place
+      t
+      [ Exchange_core.Order_request.limit
+          Fake_venue.btc
+          Sell
+          ~px:(Exchange_core.Price.of_string "101")
+          ~size:(Exchange_core.Size.of_string "1")
+      ]
+  in
+  Fake_venue.fill_best fake Sell;
+  let%bind _ = V.cancel t Fake_venue.btc [ Exchange_core.Order_id.of_int 7 ] in
+  let%bind _ = V.cancel_all t Fake_venue.btc in
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  [%expect
+    {|
+    (Place
+     (((symbol BTC) (side Sell) (size 1) (px (101)) (order_type (Limit Gtc))
+       (reduce_only false) (client_order_id ()))))
+    (Placed
+     (requests
+      (((symbol BTC) (side Sell) (size 1) (px (101)) (order_type (Limit Gtc))
+        (reduce_only false) (client_order_id ()))))
+     (result (Ok ((Resting (order_id 1) (client_order_id ()))))))
+    (Cancel (symbol BTC) (order_ids (7)))
+    (Update
+     ((order_id 1) (client_order_id ()) (symbol BTC) (side Sell) (px 101)
+      (status Filled) (filled 0) (remaining 0) (time 0)))
+    (Fill
+     ((trade_id 1) (order_id 1) (client_order_id ()) (symbol BTC) (side Sell)
+      (px 101) (size 1) (fee 0) (is_maker true) (time 0) (closed_pnl ())))
+    (Cancelled (symbol BTC) (order_ids (7)) (result (Ok ())))
+    (Cancel_all BTC)
+    (Cancelled_all (symbol BTC) (result (Ok ())))
+    |}];
+  return ()
+;;

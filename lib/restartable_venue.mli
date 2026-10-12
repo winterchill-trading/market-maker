@@ -21,6 +21,11 @@ module Make (V : Mm_core.Venue.S) : sig
       arrive, open orders and account snapshots as their requests succeed. *)
   val add_observer : t -> (Strategy_input.t -> unit) -> unit
 
+  (** [f] sees the order lifecycle: every place and cancel request before it is sent and
+      its answer when it comes back, and every order update and fill the venue reports
+      (including those that arrive between loops). *)
+  val add_order_observer : t -> (Order_event.t -> unit) -> unit
+
   (** Closes the underlying connection. *)
   val shutdown : t -> unit Deferred.t
 end

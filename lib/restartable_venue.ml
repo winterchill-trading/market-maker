@@ -33,14 +33,18 @@ module Make (V : Mm_core.Venue.S) = struct
     { inner : V.t
     ; mutable loop : Loop.t
     ; mutable observers : (Strategy_input.t -> unit) list
+    ; mutable order_observers : (Order_event.t -> unit) list
     }
 
   let observe t input = List.iter t.observers ~f:(fun f -> f input)
   let add_observer t f = t.observers <- t.observers @ [ f ]
+  let observe_order t event = List.iter t.order_observers ~f:(fun f -> f event)
+  let add_order_observer t f = t.order_observers <- t.order_observers @ [ f ]
 
-  let forward t pipe ~writer ~input =
+  let forward t pipe ~writer ~input ~order_event =
     don't_wait_for
       (Pipe.iter_without_pushback pipe ~f:(fun x ->
+         observe_order t (order_event x);
          Option.iter input ~f:(fun input -> observe t (input x));
          let w = writer t.loop in
          if not (Pipe.is_closed w) then Pipe.write_without_pushback w x))
@@ -53,13 +57,19 @@ module Make (V : Mm_core.Venue.S) = struct
 
   let connect config =
     let%map.Deferred.Or_error inner = V.connect config in
-    let t = { inner; loop = Loop.create (); observers = [] } in
+    let t = { inner; loop = Loop.create (); observers = []; order_observers = [] } in
     forward
       t
       (V.fills inner)
       ~writer:(fun l -> l.fills_w)
-      ~input:(Some (fun fill -> Strategy_input.Fill fill));
-    forward t (V.order_updates inner) ~writer:(fun l -> l.updates_w) ~input:None;
+      ~input:(Some (fun fill -> Strategy_input.Fill fill))
+      ~order_event:(fun fill -> Order_event.Fill fill);
+    forward
+      t
+      (V.order_updates inner)
+      ~writer:(fun l -> l.updates_w)
+      ~input:None
+      ~order_event:(fun update -> Order_event.Update update);
     V.on_reconnect inner ~f:(fun () ->
       List.iter (List.rev t.loop.reconnect_hooks) ~f:(fun f -> f ()));
     t
@@ -89,9 +99,27 @@ module Make (V : Mm_core.Venue.S) = struct
     >>| observed t ~input:(fun account -> Strategy_input.Account account)
   ;;
 
-  let place t orders = V.place t.inner orders
-  let cancel t symbol oids = V.cancel t.inner symbol oids
-  let cancel_all t symbol = V.cancel_all t.inner symbol
+  let place t requests =
+    observe_order t (Place requests);
+    let%map result = V.place t.inner requests in
+    observe_order t (Placed { requests; result });
+    result
+  ;;
+
+  let cancel t symbol order_ids =
+    observe_order t (Cancel { symbol; order_ids });
+    let%map result = V.cancel t.inner symbol order_ids in
+    observe_order t (Cancelled { symbol; order_ids; result });
+    result
+  ;;
+
+  let cancel_all t symbol =
+    observe_order t (Cancel_all symbol);
+    let%map result = V.cancel_all t.inner symbol in
+    observe_order t (Cancelled_all { symbol; result });
+    result
+  ;;
+
   let on_reconnect t ~f = t.loop.reconnect_hooks <- f :: t.loop.reconnect_hooks
   let close _ = return ()
 
