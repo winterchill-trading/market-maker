@@ -129,6 +129,13 @@ let command =
          ~doc:
            "FILE parameter overrides, a sexp such as ((levels 5) (skew_bps 6)); read \
             again on SIGHUP, which restarts the loop with them if they validate"
+     and shadow_params_file =
+       flag
+         "-shadow-params"
+         (optional Filename_unix.arg_type)
+         ~doc:
+           "FILE overrides for a shadow strategy run on the same inputs; its plans are \
+            logged where they differ from the live ones (read again on SIGHUP)"
      and run_for =
        flag
          "-run-for"
@@ -174,22 +181,31 @@ let command =
        let stop =
          Mm_core.Live.stop_signal ?run_for:(Option.map run_for ~f:Time_ns.Span.of_sec) ()
        in
-       let reload = Option.map params_file ~f:(fun _ -> reload_on_sighup ()) in
+       let reload =
+         Option.some_if
+           (Option.is_some params_file || Option.is_some shadow_params_file)
+           ()
+         |> Option.map ~f:reload_on_sighup
+       in
+       let params_for =
+         params_for
+           ~min_notional
+           ~levels
+           ~size
+           ~half_spread_bps
+           ~skew_bps
+           ~max_position
+           ~requote_ms
+           ~max_actions_per_sec
+       in
        let%map outcome =
          Runner.connect_and_run
            ?reload
+           ?shadow_params:
+             (Option.map shadow_params_file ~f:(fun path ->
+                params_for ~params_file:(Some path)))
            ~symbol
-           ~params:
-             (params_for
-                ~min_notional
-                ~levels
-                ~size
-                ~half_spread_bps
-                ~skew_bps
-                ~max_position
-                ~requote_ms
-                ~max_actions_per_sec
-                ~params_file)
+           ~params:(params_for ~params_file)
            ~summary_interval:(Time_ns.Span.of_sec summary_secs)
            ~stop
        in
