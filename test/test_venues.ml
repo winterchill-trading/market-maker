@@ -86,3 +86,44 @@ let%expect_test "real networks need credentials" =
   return ()
 ;;
 
+(* A throwaway key (the secp256k1 secret 1), never funded anywhere. *)
+let throwaway_key = [ "HL_PRIVATE_KEY", String.make 63 '0' ^ "1" ]
+
+let%expect_test "HL_PRIVATE_KEY signs, and mainnet is refused unless allowed" =
+  show Hyperliquid ~network:Local ~env_bindings:throwaway_key;
+  show Hyperliquid ~network:Testnet ~env_bindings:throwaway_key;
+  show
+    Hyperliquid
+    ~network:Testnet
+    ~address:"0x00000000000000000000000000000000000000aa"
+    ~env_bindings:throwaway_key;
+  show Hyperliquid ~network:Mainnet ~env_bindings:throwaway_key;
+  show
+    Hyperliquid
+    ~network:Testnet
+    ~base_url:"https://api.hyperliquid.xyz"
+    ~env_bindings:throwaway_key;
+  show Hyperliquid ~network:Mainnet ~allow_mainnet:true ~env_bindings:throwaway_key;
+  show Hyperliquid ~network:Testnet ~env_bindings:[ "HL_PRIVATE_KEY", "0xnot-a-key" ];
+  [%expect
+    {|
+    ((venue hyperliquid)
+     (endpoint
+      "http://localhost:3000 (account 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf, signed for testnet)"))
+    ((venue hyperliquid)
+     (endpoint
+      "https://api.hyperliquid-testnet.xyz (account 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf, signed for testnet)"))
+    ((venue hyperliquid)
+     (endpoint
+      "https://api.hyperliquid-testnet.xyz (account 0x00000000000000000000000000000000000000aa, signed for testnet)"))
+    ("refusing to sign orders for Hyperliquid mainnet without -i-understand-mainnet"
+     (base_url https://api.hyperliquid.xyz))
+    ("refusing to sign orders for Hyperliquid mainnet without -i-understand-mainnet"
+     (base_url https://api.hyperliquid.xyz))
+    ((venue hyperliquid)
+     (endpoint
+      "https://api.hyperliquid.xyz (account 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf, signed for mainnet)"))
+    ("not a secp256k1 private key (64 hex digits)" (var HL_PRIVATE_KEY))
+    |}];
+  return ()
+;;
