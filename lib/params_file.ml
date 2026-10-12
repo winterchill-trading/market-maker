@@ -12,6 +12,25 @@ let fields_of sexp =
     Or_error.error_s [%message "expected a list of (name value) fields" (sexp : Sexp.t)]
 ;;
 
+(* Every field name. [sexp_of_t] leaves out fields at their default
+   ([action_rate_grace_ms]) or [None] ([action_rate_cooldown_ms]), so read the names off
+   parameters where those are set. *)
+let field_names =
+  lazy
+    (let probe =
+       { Mm_core.Params.btc with
+         action_rate_grace_ms = Mm_core.Params.btc.action_rate_grace_ms + 1
+       ; action_rate_cooldown_ms = Some 1
+       }
+     in
+     match Mm_core.Params.sexp_of_t probe with
+     | List fields ->
+       List.filter_map fields ~f:(function
+         | List [ Atom name; _ ] -> Some name
+         | _ -> None)
+     | Atom _ -> [])
+;;
+
 let apply (base : Mm_core.Params.t) ~overrides =
   let open Or_error.Let_syntax in
   let%bind overrides = fields_of overrides in
@@ -26,7 +45,7 @@ let apply (base : Mm_core.Params.t) ~overrides =
   let%bind () =
     match
       List.filter overrides ~f:(fun (name, _) ->
-        not (List.Assoc.mem base_fields name ~equal:String.equal))
+        not (List.mem (force field_names) name ~equal:String.equal))
     with
     | [] -> Ok ()
     | unknown ->
@@ -39,6 +58,10 @@ let apply (base : Mm_core.Params.t) ~overrides =
         Option.value (List.Assoc.find overrides name ~equal:String.equal) ~default:value
       in
       Sexp.List [ Atom name; value ])
+    @ List.filter_map overrides ~f:(fun (name, value) ->
+      Option.some_if
+        (not (List.Assoc.mem base_fields name ~equal:String.equal))
+        (Sexp.List [ Atom name; value ]))
   in
   let%bind params =
     Or_error.try_with (fun () -> Mm_core.Params.t_of_sexp (Sexp.List merged))
