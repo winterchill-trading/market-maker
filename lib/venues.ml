@@ -72,6 +72,7 @@ module type RUNNER = sig
 
   val connect_and_run
     :  ?reload:unit Pipe.Reader.t
+    -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t
@@ -125,8 +126,9 @@ let hyperliquid ?base_url ?address ~getenv ~network () =
 
       let min_notional _ = Deferred.Or_error.return (Some hyperliquid_min_notional)
 
-      let[@warning "-unerasable-optional-argument"] connect_and_run ?reload =
-        Hyperliquid_live.connect_and_run ?reload config
+      let[@warning "-unerasable-optional-argument"] connect_and_run ?reload ?shadow_params
+        =
+        Hyperliquid_live.connect_and_run ?reload ?shadow_params config
       ;;
     end : RUNNER)
 ;;
@@ -175,8 +177,8 @@ let binance ?base_url ~getenv ~network () =
       |> Option.bind ~f:Binance_protocol.Exchange_info.Symbol_info.min_notional
     ;;
 
-    let[@warning "-unerasable-optional-argument"] connect_and_run ?reload =
-      Binance_live.connect_and_run ?reload config
+    let[@warning "-unerasable-optional-argument"] connect_and_run ?reload ?shadow_params =
+      Binance_live.connect_and_run ?reload ?shadow_params config
     ;;
   end : RUNNER)
 ;;
@@ -207,8 +209,8 @@ let bybit ?base_url ~getenv ~network () =
         i.lot_size_filter.min_notional_value)
     ;;
 
-    let[@warning "-unerasable-optional-argument"] connect_and_run ?reload =
-      Bybit_live.connect_and_run ?reload config
+    let[@warning "-unerasable-optional-argument"] connect_and_run ?reload ?shadow_params =
+      Bybit_live.connect_and_run ?reload ?shadow_params config
     ;;
   end : RUNNER)
 ;;
