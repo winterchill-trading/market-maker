@@ -172,6 +172,13 @@ let command =
          ~doc:
            "FILE write every strategy input and plan there, one sexp per line, for \
             offline replay (debugging; books make it grow fast)"
+     and order_log =
+       flag
+         "-order-log"
+         (optional Filename_unix.arg_type)
+         ~doc:
+           "FILE write every order request, answer, order update and fill there as CSV \
+            rows with local and venue timestamps (see queries/fills_vs_trades.sql)"
      and run_for =
        flag
          "-run-for"
@@ -242,6 +249,7 @@ let command =
            ?time_source:None
            ?reload
            ?strategy_log
+           ?order_log
            ?shadow_params:
              (Option.map shadow_params_file ~f:(fun path ->
                 params_for ~params_file:(Some path)))
