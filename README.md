@@ -8,7 +8,7 @@ One binary wraps each venue adapter in `Mm_core.Live.Make`:
 
 | Venue | Adapter | Simulator (default port) | Default symbol |
 | --- | --- | --- | --- |
-| `hyperliquid` | `Hl_mm.Hl_venue` ([hl-mm](https://github.com/winterchill-trading/hl-mm)) | [hl-sim](https://github.com/winterchill-trading/hl-sim) (3000) | `BTC` |
+| `hyperliquid` | `Hl_mm.Hl_venue.Trading` ([hl-mm](https://github.com/winterchill-trading/hl-mm)) | [hl-sim](https://github.com/winterchill-trading/hl-sim) (3000) | `BTC` |
 | `binance` | `Binance_client.Venue` ([binance-client](https://github.com/winterchill-trading/binance-client)) | [binance-sim](https://github.com/winterchill-trading/binance-sim) (3300) | `BTCUSDT` |
 | `bybit` | `Bybit_client.Venue` ([bybit-client](https://github.com/winterchill-trading/bybit-client)) | [bybit-sim](https://github.com/winterchill-trading/bybit-sim) (3400) | `BTCUSDT` |
 
@@ -17,16 +17,19 @@ One binary wraps each venue adapter in `Mm_core.Live.Make`:
 ```sh
 opam switch create 5.2.0+ox --repos ox=git+https://github.com/oxcaml/opam-repository.git,default
 for repo in fixed-decimal exchange-core mm-core hl-protocol parquet market-data venue-net \
-    hl-client hl-mm binance-protocol binance-client bybit-protocol bybit-client; do
+    hl-client hl-mm binance-protocol binance-client bybit-protocol bybit-client \
+    order-book price-anchor hl-sim; do
   opam pin add -n -y $repo https://github.com/winterchill-trading/$repo.git
 done
+opam pin add -n -y exchange-core-engine https://github.com/winterchill-trading/exchange-core.git
 opam install . --deps-only --with-test
 dune build && dune test
 ```
 
-These are the pins CI uses (`infra/scripts/check-pins.sh` lists them). The simulators
-are not needed to build; the scripts below build them from a workspace. Inside a dune
-workspace that also contains the sibling repositories, dune uses their sources and the
+These are the pins CI uses (`infra/scripts/check-pins.sh` lists them). hl-sim and its
+engine are test dependencies (the signed Hyperliquid test runs against it); the other
+simulators are not needed to build; the scripts below build them from a workspace.
+Inside a dune workspace that also contains the sibling repositories, dune uses their sources and the
 pins are not needed. `https://` and `wss://` need `async_ssl` built
 against OpenSSL 3; see
 [hl-client's notes](https://github.com/winterchill-trading/hl-client#macos-and-openssl).
@@ -43,6 +46,7 @@ dune exec market-maker -- -venue binance -run-for 60
 
 market-maker -venue hyperliquid -base-url http://127.0.0.1:3000 -levels 5
 BYBIT_API_KEY=... BYBIT_API_SECRET=... market-maker -venue bybit -network testnet
+HL_PRIVATE_KEY=... market-maker -venue hyperliquid -network testnet
 ```
 
 | Flag | Default | Meaning |
@@ -50,7 +54,8 @@ BYBIT_API_KEY=... BYBIT_API_SECRET=... market-maker -venue bybit -network testne
 | `-venue` | required | `hyperliquid`, `binance` or `bybit` |
 | `-network` | `local` | `local` (the simulator on its default port), `testnet` or `mainnet` |
 | `-base-url` | the network's | REST root; websocket URLs are derived from it |
-| `-address` | `HL_ADDRESS`, else a simulator account | Hyperliquid account |
+| `-address` | `HL_ADDRESS`, else the `HL_PRIVATE_KEY` address, else a simulator account | Hyperliquid account |
+| `-i-understand-mainnet` | off | allow signed Hyperliquid orders on mainnet |
 | `-symbol` | `BTC` / `BTCUSDT` | instrument to quote |
 | `-levels` | 3 | quote levels per side |
 | `-size` | about 100 USD, at least 1.2x the venue minimum | order size per level |
@@ -70,9 +75,24 @@ BYBIT_API_KEY=... BYBIT_API_SECRET=... market-maker -venue bybit -network testne
 
 Credentials come from the environment: `BINANCE_API_KEY` and `BINANCE_API_SECRET`,
 `BYBIT_API_KEY` and `BYBIT_API_SECRET` (both required off the simulator; locally the key
-defaults to `market-maker`, which the simulators use as the account), and `HL_ADDRESS`.
-Hyperliquid requests are unsigned (hl-sim's `X-Address` convention), so only the
-simulator accepts orders on that venue.
+defaults to `market-maker`, which the simulators use as the account), `HL_PRIVATE_KEY`
+and `HL_ADDRESS`.
+
+### Hyperliquid signing
+
+With `HL_PRIVATE_KEY` set (64 hex digits), Hyperliquid exchange requests are signed
+through `hl-client`'s trading handle (`Hl_mm.Hl_venue.Trading`), and the account is
+`-address`, else `HL_ADDRESS`, else the key's address (so an agent key can trade for
+another account). Without it requests are unsigned (hl-sim's `X-Address` convention) and
+only the simulator accepts orders. The startup log line names the account and whether
+requests are `unsigned` or `signed for testnet`.
+
+The signing domain is testnet unless the REST root is `api.hyperliquid.xyz`. A signed
+run against mainnet (`-network mainnet` or a mainnet `-base-url`) refuses to start unless
+`-i-understand-mainnet` is passed; nothing defaults to mainnet (`-network` defaults to
+`local`). hl-sim does not check signatures, so a signed run against it shows that orders
+go out signed, not that the exchange accepts them; the tests check the signer by
+recovering it from the journalled requests.
 
 Before connecting, the binary reads the venue's minimum order value (Binance's
 `MIN_NOTIONAL` filter, Bybit's `minNotionalValue`, Hyperliquid's 10 USD) and passes it to
@@ -161,7 +181,8 @@ module type RUNNER = sig
   val endpoint : string
   val min_notional : Symbol.t -> Usd.t option Or_error.t Deferred.t
   val connect_and_run
-    :  ?reload:unit Pipe.Reader.t
+    :  ?time_source:Time_source.t
+    -> ?reload:unit Pipe.Reader.t
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> ?strategy_log:string
     -> symbol:Symbol.t
@@ -171,8 +192,8 @@ module type RUNNER = sig
     -> Session.Outcome.t Or_error.t Deferred.t
 end
 
-val runner : ?base_url:Uri.t -> ?address:string -> ?getenv:(string -> string option)
-  -> Venue_choice.t -> network:Network.t -> (module RUNNER) Or_error.t
+val runner : ?base_url:Uri.t -> ?address:string -> ?allow_mainnet:bool
+  -> ?getenv:(string -> string option) -> Venue_choice.t -> network:Network.t -> (module RUNNER) Or_error.t
 ```
 
 The other modules:
@@ -193,6 +214,7 @@ The other modules:
 scripts/e2e.sh binance            # 60 s against a seeded binance-sim on a free port
 scripts/e2e.sh bybit 30 -levels 5 # seconds, then market-maker flags
 FAULT_AT=10 scripts/e2e.sh hl 30  # restart hl-sim 10 s in, check the recovery
+SIGNED=1 scripts/e2e.sh hl 15     # sign with a throwaway key, check hl-sim's journal
 scripts/e2e-all.sh                # all three, then a fault run on binance
 scripts/compare-venues.sh         # one order sequence on hl-sim and binance-sim, diffed
 ```
@@ -208,6 +230,13 @@ With `FAULT_AT=SECONDS`, `e2e.sh` kills the simulator that far into the run, kee
 down for `FAULT_DOWN` seconds (3) and restarts it on the same port. The run then fails
 unless the report counts a reconnect, the log shows a resync and a plan placing orders
 after the kill, and the final mode is `Running`.
+
+With `SIGNED=1` (Hyperliquid only), `e2e.sh` sets `HL_PRIVATE_KEY` to a throwaway key
+(the secp256k1 secret 1, address `0x7e5f4552091a69125d5dfcb7b8c2659029395bdf`), starts
+hl-sim with `-journal`, and fails unless the maker logged `signed for testnet` and every
+journalled order request carries a signature, for that account. A 15 s run placed 66
+orders in 21 order requests, all signed. Without `SIGNED=1` the script clears
+`HL_PRIVATE_KEY` and `HL_ADDRESS`, so a key in the environment never changes a run.
 
 `e2e-all.sh` first prints the commit of every sibling checkout (`+dirty` with local
 changes), runs the three venues, then the fault run on `FAULT_VENUE` (default `binance`,
@@ -346,6 +375,9 @@ checks, and drives `Session` over an in-memory venue on a synthetic clock: tick-
 stats, reloads (rejected, applied, unchanged) through a pipe standing in for SIGHUP,
 shadow plans, a strategy log that replays to the same plans, and a reconnect followed by
 a requote burst that halts neither the loop nor its mirrors (and does halt both without
-the reconnect's grace period). `Params_file`, `Shadow`,
+the reconnect's grace period). A signed Hyperliquid run (`HL_PRIVATE_KEY` set to a
+throwaway key) quotes on an in-process hl-sim whose clock is the test's synthetic one; the
+test recovers the signer of every journalled request: the maker's orders and cancels are
+signed by the key, for the key's account. `Params_file`, `Shadow`,
 `Strategy_log` and `Restartable_venue` have their own tests. The adapters' own test
 suites run the strategy on each simulator.
