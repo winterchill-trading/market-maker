@@ -84,6 +84,7 @@ let%expect_test "replaying a log gives the same plans" =
          | Fill _ -> "fill"
          | Open_orders _ -> "open orders"
          | Account _ -> "account")
+    | Resync { now } -> printf "resync at %dms\n" (now / 1_000_000)
     | Tick { now; plan } ->
       printf "tick at %dms: %d actions\n" (now / 1_000_000) (List.length plan));
   print_replay events;
@@ -148,6 +149,41 @@ let%expect_test "file round trip" =
   [%expect {|
     ((lines 17) (events 17))
     ((ticks 8) (plans 3))
+    |}];
+  return ()
+;;
+
+let%expect_test "a resync before a requote burst replays; without it the burst halts" =
+  let params =
+    { Mm_core.Params.btc with max_actions_per_sec = 40; action_rate_grace_ms = 1_000 }
+  in
+  let events = Queue.create () in
+  let log = Strategy_log.of_writer (Queue.enqueue events) ~params in
+  Strategy_log.on_resync log ~now:(ms 10_000);
+  (* The mid flips by 10 bps every 2 ms, so each tick replaces the ladder. *)
+  List.iter (List.range 10_000 10_200 ~stride:2) ~f:(fun at ->
+    let mid = if at / 2 % 2 = 0 then 100_000 else 100_100 in
+    Strategy_log.on_input
+      log
+      (book ~time:at ~bid:(Int.to_string (mid - 10)) ~ask:(Int.to_string (mid + 10)))
+      ~now:(ms at);
+    Strategy_log.on_input log (Open_orders []) ~now:(ms at));
+  let events = Queue.to_list events in
+  print_s [%sexp (Strategy_log.mode log : Mm_core.Strategy.Mode.t)];
+  print_replay events;
+  let without_resync =
+    List.filter events ~f:(function
+      | Resync _ -> false
+      | _ -> true)
+  in
+  let replay = ok_exn (Strategy_log.Replay.run without_resync) in
+  print_s
+    [%message "without the resync" ~mismatches:(List.length replay.mismatches : int)];
+  [%expect
+    {|
+    Running
+    ((ticks 200) (plans 100))
+    ("without the resync" (mismatches 93))
     |}];
   return ()
 ;;
