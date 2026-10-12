@@ -1,0 +1,8 @@
+(library
+ (name market_maker_test)
+ (libraries core async exchange-core market-maker uri)
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .)))
+ (preprocess
+  (pps ppx_jane)))
