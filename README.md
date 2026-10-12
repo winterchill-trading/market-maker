@@ -199,9 +199,19 @@ after the kill, and the final mode is `Running`.
 `e2e-all.sh` first prints the commit of every sibling checkout (`+dirty` with local
 changes), runs the three venues, then the fault run on `FAULT_VENUE` (default `binance`,
 `none` skips it) with the restart a third of the way in, and ends with a tick-to-order
-table. The fault run passes `-max-actions-per-sec 1000`: a freshly started simulator's
-book jumps for its first seconds, the maker requotes on every jump, and the default cap
-of 100 actions per second trips a halt, which is permanent (seen on all three venues).
+table. The fault run uses the default cap of 100 actions per second. A freshly started
+simulator's book jumps for its first seconds and the maker requotes on every jump; before
+the action rate grace period that burst tripped a permanent halt (seen on all three
+venues), so the run used to pass `-max-actions-per-sec 1000`. Now the reconnect starts a
+5 s grace period (`-action-rate-grace-ms`) in which the burst is not counted.
+
+Fault runs of 30 s with the restart 10 s in, default cap, grace period off and on:
+
+| Venue | `-action-rate-grace-ms 0` | default (5000) |
+| --- | --- | --- |
+| hyperliquid | Running (1 reconnect) | Running (1 reconnect) |
+| binance | Running (2 reconnects) | Running (2 reconnects) |
+| bybit | `Halted (Max_action_rate (actions 103))`, fault check fails | Running (2 reconnects) |
 
 ## Example runs
 
@@ -219,6 +229,17 @@ fault-binance  n=54 p50=62us p99=996us max=996us
 The fault run reconnected twice (public and private streams), resynchronised and kept
 quoting; the restarted simulator had lost the resting orders and the account, which the
 next snapshot picked up.
+
+The same run after the grace period and in-place params reloads, with the fault run at
+the default action rate cap (it reconnected twice and ended `Running`):
+
+```
+--- tick-to-order latency ---
+hyperliquid    n=52 p50=61us p99=291us max=291us
+binance        n=69 p50=58us p99=1.5ms max=1.5ms
+bybit          n=67 p50=60us p99=2.1ms max=2.1ms
+fault-binance  n=47 p50=67us p99=689us max=689us
+```
 
 Earlier 60 second runs, before the tick-to-order line was added:
 
