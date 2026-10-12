@@ -227,7 +227,7 @@ let%expect_test "the strategy log of a session replays to the same plans" =
         (outcome.report.fills : int)
         ~params_lines:
           (count (function
-             | Params _ -> true
+             | Params _ | Update_params _ -> true
              | _ -> false)
            : int)
         ~fills_logged:
@@ -240,7 +240,7 @@ let%expect_test "the strategy log of a session replays to the same plans" =
     {|
     ((outcome.reloads 1) ("(outcome.report).fills" 4) (params_lines 2)
      (fills_logged 4))
-    ((ticks 60) (plans 10) (mismatches ()))
+    ((ticks 60) (plans 6) (mismatches ()))
     |}];
   return ()
 ;;

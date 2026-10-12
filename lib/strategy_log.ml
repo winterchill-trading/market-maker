@@ -4,6 +4,7 @@ open! Async
 module Event = struct
   type t =
     | Params of Mm_core.Params.t
+    | Update_params of Mm_core.Params.t
     | Input of Strategy_input.t
     | Tick of
         { now : int
@@ -44,9 +45,10 @@ let on_input t input ~now =
   t.write (Tick { now; plan })
 ;;
 
-let restart t ~params =
-  t.write (Params params);
-  t.strategy <- Mm_core.Strategy.create params
+let update_params t params =
+  let%map.Or_error strategy = Mm_core.Strategy.update_params t.strategy params in
+  t.write (Update_params params);
+  t.strategy <- strategy
 ;;
 
 let close t = t.close ()
@@ -73,7 +75,7 @@ module Replay = struct
 
   let run events =
     match events with
-    | [] | (Event.Input _ | Tick _) :: _ ->
+    | [] | (Event.Input _ | Update_params _ | Tick _) :: _ ->
       Or_error.error_string "a strategy log starts with a Params line"
     | Params _ :: _ ->
       Or_error.try_with (fun () ->
@@ -84,7 +86,10 @@ module Replay = struct
             ~f:(fun i (strategy, acc) event ->
               match event, strategy with
               | Params params, _ -> Some (Mm_core.Strategy.create params), acc
-              | (Input _ | Tick _), None -> assert false (* the log starts with Params *)
+              | (Input _ | Update_params _ | Tick _), None ->
+                assert false (* the log starts with Params *)
+              | Update_params params, Some strategy ->
+                Some (ok_exn (Mm_core.Strategy.update_params strategy params)), acc
               | Input input, Some strategy ->
                 Some (Strategy_input.apply strategy input), acc
               | Tick { now; plan }, Some strategy ->

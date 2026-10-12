@@ -18,7 +18,9 @@ open! Async
 
 module Event : sig
   type t =
-    | Params of Mm_core.Params.t (** a new strategy: the start, or a reload *)
+    | Params of Mm_core.Params.t (** a new strategy (the start of the log) *)
+    | Update_params of Mm_core.Params.t
+    (** a reload: [Mm_core.Strategy.update_params] on the running strategy *)
     | Input of Strategy_input.t
     | Tick of
         { now : int (** nanoseconds since the epoch *)
@@ -38,8 +40,10 @@ val of_writer : (Event.t -> unit) -> params:Mm_core.Params.t -> t
 (** Logs [input], feeds it to the mirror, ticks at [now] and logs the plan. *)
 val on_input : t -> Strategy_input.t -> now:int -> unit
 
-(** Starts a new mirror with [params] (after a reload) and logs a [Params] line. *)
-val restart : t -> params:Mm_core.Params.t -> unit
+(** Swaps the mirror's parameters as the live loop does on a reload
+    ([Mm_core.Strategy.update_params]) and logs an [Update_params] line. Errors, logging
+    nothing, when the strategy rejects them. *)
+val update_params : t -> Mm_core.Params.t -> unit Or_error.t
 
 (** Flushes and closes the file. *)
 val close : t -> unit Deferred.t
@@ -62,8 +66,8 @@ module Replay : sig
     }
   [@@deriving sexp_of]
 
-  (** Runs the events through a fresh [Mm_core.Strategy] (a new one at every [Params]) and
-      compares each tick's plan with the logged one. Fails when the log does not start
-      with [Params]. *)
+  (** Runs the events through a fresh [Mm_core.Strategy] (a new one at every [Params],
+      updated in place at every [Update_params]) and compares each tick's plan with the
+      logged one. Fails when the log does not start with [Params]. *)
   val run : Event.t list -> t Or_error.t
 end

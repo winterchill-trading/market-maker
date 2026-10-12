@@ -218,7 +218,12 @@ module Make (V : Mm_core.Venue.S) = struct
                   [%message
                     "params reloaded" ~changes:(changed_fields current next : Sexp.t list)];
                 reload_shadow ~live:next ~live_changed:true;
-                Option.iter strategy_log ~f:(Strategy_log.restart ~params:next);
+                Option.iter strategy_log ~f:(fun log ->
+                  match Strategy_log.update_params log next with
+                  | Ok () -> ()
+                  | Error error ->
+                    Log.Global.error_s
+                      [%message "strategy log: params update failed" (error : Error.t)]);
                 loop live ~current:next ~reloads:(reloads + 1)))
       in
       (match%bind start first_params with

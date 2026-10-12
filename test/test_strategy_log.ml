@@ -50,9 +50,10 @@ let record () =
   List.iter script ~f:(function
     | `Input (at, input) -> Strategy_log.on_input log input ~now:(ms at)
     | `Reload overrides ->
-      Strategy_log.restart
+      Strategy_log.update_params
         log
-        ~params:(ok_exn (Params_file.apply params ~overrides:(Sexp.of_string overrides))));
+        (ok_exn (Params_file.apply params ~overrides:(Sexp.of_string overrides)))
+      |> ok_exn);
   Queue.to_list events
 ;;
 
@@ -74,6 +75,7 @@ let%expect_test "replaying a log gives the same plans" =
   let events = record () in
   List.iter events ~f:(function
     | Params p -> printf "params, %d levels\n" p.levels
+    | Update_params p -> printf "update params, %d levels\n" p.levels
     | Input input ->
       printf
         "input %s\n"
@@ -100,7 +102,7 @@ let%expect_test "replaying a log gives the same plans" =
     tick at 1500ms: 0 actions
     input open orders
     tick at 1510ms: 0 actions
-    params, 1 levels
+    update params, 1 levels
     input book
     tick at 2000ms: 2 actions
     input book
