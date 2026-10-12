@@ -59,6 +59,8 @@ BYBIT_API_KEY=... BYBIT_API_SECRET=... market-maker -venue bybit -network testne
 | `-max-position` | 10 x size | absolute position limit |
 | `-requote-ms` | 1000 | requote and open-orders poll interval |
 | `-max-actions-per-sec` | 100 | halt when plans send more cancels and places than this in a second |
+| `-action-rate-grace-ms` | 5000 | after a venue reconnect, neither count nor check the action rate for this long |
+| `-action-rate-cooldown-ms` | none (the halt is permanent) | clear an action rate halt this long after it tripped |
 | `-params` | none | parameter overrides file, reloaded on SIGHUP (below) |
 | `-shadow-params` | none | overrides for a shadow strategy whose differing plans are logged (below) |
 | `-strategy-log` | none | write every strategy input and plan to this file (below) |
@@ -101,6 +103,14 @@ orders that still match the new ladder and replaces the rest. A changed
 `requote_interval_ms` re-arms the poll timer; a halted strategy stays halted. If the loop
 rejects the parameters (it is stopping, or they name another symbol) the error is logged
 and the current ones stay. A field removed from the file reverts to its default on the next reload.
+
+The action rate kill switch has two keys besides `max_actions_per_sec`, also settable by
+flag: `action_rate_grace_ms` (default 5000) is the window after a venue reconnect in
+which actions are neither counted nor checked, so the requote burst after a resync (a
+restarted simulator, a dropped stream) cannot trip the switch; `action_rate_cooldown_ms`
+(default none) clears a `Max_action_rate` halt that long after it tripped. Both are left
+out of the parameter sexp at their defaults; in a file the cooldown is a plain number
+(`(action_rate_cooldown_ms 30000)`) and leaving it out means none.
 
 ### Shadow parameters
 
