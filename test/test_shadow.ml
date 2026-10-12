@@ -100,3 +100,40 @@ let%expect_test "updating the shadow to the live parameters keeps its state" =
     |}];
   return ()
 ;;
+
+let%expect_test "a requote burst right after on_resync halts neither strategy" =
+  let live =
+    { Mm_core.Params.btc with max_actions_per_sec = 40; action_rate_grace_ms = 1_000 }
+  in
+  let burst ~resync =
+    let t = Shadow.create ~live ~shadow:{ live with levels = 1 } in
+    if resync then Shadow.on_resync t ~now:(ms 10_000);
+    (* The mid flips by 10 bps every 2 ms, so each tick replaces the ladder. *)
+    List.iter (List.range 10_000 10_200 ~stride:2) ~f:(fun at ->
+      let mid = if at / 2 % 2 = 0 then 100_000 else 100_100 in
+      Shadow.on_input
+        t
+        (book ~time:at ~bid:(Int.to_string (mid - 10)) ~ask:(Int.to_string (mid + 10)))
+        ~now:(ms at)
+        ~on_difference:(fun ~live:_ ~shadow:_ -> ());
+      Shadow.on_input
+        t
+        (Open_orders [])
+        ~now:(ms at)
+        ~on_difference:(fun ~live:_ ~shadow:_ -> ()));
+    print_s
+      [%message
+        (resync : bool)
+          ~live:(Shadow.live_mode t : Mm_core.Strategy.Mode.t)
+          ~shadow:(Shadow.shadow_mode t : Mm_core.Strategy.Mode.t)]
+  in
+  burst ~resync:false;
+  burst ~resync:true;
+  [%expect
+    {|
+    ((resync false) (live (Halted (Max_action_rate (actions 42))))
+     (shadow (Halted (Max_action_rate (actions 42)))))
+    ((resync true) (live Running) (shadow Running))
+    |}];
+  return ()
+;;
