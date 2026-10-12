@@ -5,10 +5,9 @@
 #
 # Then a fault phase: one more run on FAULT_VENUE (default binance) whose simulator is
 # restarted a third of the way in (see FAULT_AT in e2e.sh); it fails unless the maker
-# reconnects and keeps quoting. FAULT_VENUE=none skips it. A freshly started simulator's
-# book jumps for its first seconds, and the requotes it causes trip the default limit of
-# 100 actions per second (a sticky halt), so this run raises it with
-# -max-actions-per-sec 1000.
+# reconnects and keeps quoting. FAULT_VENUE=none skips it. It runs with the default
+# action rate limit: the requote burst after the reconnect falls in the action rate grace
+# period (-action-rate-grace-ms, 5 s), so it cannot halt the maker.
 #
 # Starts by printing the commit each sibling checkout in the workspace is at (WORKSPACE,
 # default the parent of this checkout), marked "+dirty" with uncommitted changes.
@@ -52,7 +51,7 @@ if [[ "$fault_venue" != none ]]; then
   fault_at=$((seconds / 3 > 5 ? seconds / 3 : 5))
   echo "=== fault: $fault_venue, simulator restarted after ${fault_at}s ===" >&2
   FAULT_AT="$fault_at" LOG_DIR="$log_root/fault-$fault_venue" \
-    "$here/e2e.sh" "$fault_venue" "$@" -max-actions-per-sec 1000 \
+    "$here/e2e.sh" "$fault_venue" "$@" \
     || failed+=("fault-$fault_venue")
   venues+=("fault-$fault_venue")
 fi
