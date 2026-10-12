@@ -75,7 +75,7 @@ module type RUNNER = sig
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t
     -> stop:unit Deferred.t
-    -> Mm_core.Live.Report.t Or_error.t Deferred.t
+    -> Session.Outcome.t Or_error.t Deferred.t
 end
 
 (* "mm" in ASCII, as in hl-mm. *)
@@ -83,9 +83,9 @@ let simulator_address = "0x0000000000000000000000000000000000006d6d"
 let local_api_key = "market-maker"
 let hyperliquid_min_notional = Usd.of_int 10
 
-module Hyperliquid_live = Mm_core.Live.Make (Hl_mm.Hl_venue)
-module Binance_live = Mm_core.Live.Make (Binance_client.Venue)
-module Bybit_live = Mm_core.Live.Make (Bybit_client.Venue)
+module Hyperliquid_live = Session.Make (Hl_mm.Hl_venue)
+module Binance_live = Session.Make (Binance_client.Venue)
+module Bybit_live = Session.Make (Bybit_client.Venue)
 
 let parse_address s =
   Or_error.try_with (fun () ->

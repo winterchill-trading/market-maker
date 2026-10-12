@@ -144,7 +144,7 @@ let command =
        let stop =
          Mm_core.Live.stop_signal ?run_for:(Option.map run_for ~f:Time_ns.Span.of_sec) ()
        in
-       let%map report =
+       let%map outcome =
          Runner.connect_and_run
            ~symbol
            ~params:
@@ -160,7 +160,7 @@ let command =
            ~stop
        in
        printf "--- market-maker report (%s) ---\n" (Venues.Venue_choice.to_string venue);
-       print_endline (Mm_core.Live.Report.to_string_hum report))
+       print_endline (Session.Outcome.to_string_hum outcome))
 ;;
 
 let () = Command_unix.run command

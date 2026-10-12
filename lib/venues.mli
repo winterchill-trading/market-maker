@@ -1,6 +1,6 @@
 (** Venue selection: builds the client configuration of Hyperliquid, Binance or Bybit (or
     their simulators) from command-line choices and the environment, and hides the venue
-    behind a common {!RUNNER} interface over [Mm_core.Live.Make]. *)
+    behind a common {!RUNNER} interface over {!Session.Make}. *)
 
 open! Core
 open! Async
@@ -51,13 +51,13 @@ module type RUNNER = sig
       [MIN_NOTIONAL] filter, Bybit's [minNotionalValue], Hyperliquid's fixed 10 USD. *)
   val min_notional : Symbol.t -> Usd.t option Or_error.t Deferred.t
 
-  (** [Mm_core.Live.Make (V).connect_and_run] with the bound configuration. *)
+  (** [Session.Make (V).connect_and_run] with the bound configuration. *)
   val connect_and_run
     :  symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t
     -> stop:unit Deferred.t
-    -> Mm_core.Live.Report.t Or_error.t Deferred.t
+    -> Session.Outcome.t Or_error.t Deferred.t
 end
 
 (** Builds the configuration and picks the adapter.
