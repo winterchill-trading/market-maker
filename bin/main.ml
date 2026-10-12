@@ -18,6 +18,8 @@ let params_for
   ~max_position
   ~requote_ms
   ~max_actions_per_sec
+  ~action_rate_grace_ms
+  ~action_rate_cooldown_ms
   ~params_file
   =
   Or_error.try_with_join (fun () ->
@@ -38,6 +40,10 @@ let params_for
       ; requote_interval_ms = Option.value requote_ms ~default:base.requote_interval_ms
       ; max_actions_per_sec =
           Option.value max_actions_per_sec ~default:base.max_actions_per_sec
+      ; action_rate_grace_ms =
+          Option.value action_rate_grace_ms ~default:base.action_rate_grace_ms
+      ; action_rate_cooldown_ms =
+          Option.first_some action_rate_cooldown_ms base.action_rate_cooldown_ms
       }
     in
     match params_file with
@@ -122,6 +128,20 @@ let command =
          "-max-actions-per-sec"
          (optional int)
          ~doc:"N halt when plans send more cancels and places than this in a second (100)"
+     and action_rate_grace_ms =
+       flag
+         "-action-rate-grace-ms"
+         (optional int)
+         ~doc:
+           "MS after a venue reconnect, do not count or check the action rate for this \
+            long, so the requote burst cannot halt the maker (default 5000)"
+     and action_rate_cooldown_ms =
+       flag
+         "-action-rate-cooldown-ms"
+         (optional int)
+         ~doc:
+           "MS clear an action rate halt this long after it tripped (default: never, the \
+            halt is permanent)"
      and params_file =
        flag
          "-params"
@@ -204,6 +224,8 @@ let command =
            ~max_position
            ~requote_ms
            ~max_actions_per_sec
+           ~action_rate_grace_ms
+           ~action_rate_cooldown_ms
        in
        let%map outcome =
          Runner.connect_and_run
