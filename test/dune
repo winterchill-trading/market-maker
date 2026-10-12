@@ -1,6 +1,14 @@
 (library
  (name market_maker_test)
- (libraries core async exchange-core market-maker mm-core uri)
+ (libraries
+  core
+  core_unix
+  core_unix.filename_unix
+  async
+  exchange-core
+  market-maker
+  mm-core
+  uri)
  (inline_tests
   (flags
    (:standard -source-tree-root .)))
