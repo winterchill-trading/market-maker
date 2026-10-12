@@ -17,6 +17,10 @@ module Make (V : Mm_core.Venue.S) : sig
       [order_updates] readers get everything from now on. *)
   val next_loop : t -> unit
 
+  (** [f] sees every value the live loop hands to the strategy: books and fills as they
+      arrive, open orders and account snapshots as their requests succeed. *)
+  val add_observer : t -> (Strategy_input.t -> unit) -> unit
+
   (** Closes the underlying connection. *)
   val shutdown : t -> unit Deferred.t
 end

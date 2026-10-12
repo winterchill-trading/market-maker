@@ -45,3 +45,41 @@ let%expect_test "a second loop gets the feeds, close waits for shutdown" =
     |}];
   return ()
 ;;
+
+let%expect_test "observers see what the strategy is fed" =
+  let fake = Fake_venue.create () in
+  let%bind t = V.connect fake >>| ok_exn in
+  V.add_observer t (fun input ->
+    print_endline
+      (match input with
+       | Book book -> sprintf "book, %d bids" (List.length book.bids)
+       | Fill fill -> sprintf "fill %s" (Exchange_core.Trade_id.to_string fill.trade_id)
+       | Open_orders orders -> sprintf "open orders, %d" (List.length orders)
+       | Account account ->
+         sprintf "account, equity %s" (Exchange_core.Usd.to_string account.equity)));
+  Fake_venue.push_book fake ~bid:"99" ~ask:"101";
+  let%bind books = V.books t Fake_venue.btc in
+  let%bind _ = Pipe.read books in
+  let%bind _ =
+    V.place
+      t
+      [ Exchange_core.Order_request.limit
+          Fake_venue.btc
+          Sell
+          ~px:(Exchange_core.Price.of_string "101")
+          ~size:(Exchange_core.Size.of_string "1")
+      ]
+  in
+  let%bind _ = V.open_orders t Fake_venue.btc in
+  let%bind _ = V.account t in
+  Fake_venue.fill_best fake Sell;
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  [%expect
+    {|
+    book, 1 bids
+    open orders, 1
+    account, equity 1000
+    fill 1
+    |}];
+  V.shutdown t
+;;
