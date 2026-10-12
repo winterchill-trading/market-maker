@@ -11,9 +11,11 @@
 #   <root>/dune-workspace      (lang dune 3.17)
 #   <root>/market-maker  <root>/hl-sim  <root>/binance-sim  <root>/bybit-sim  ...
 #
-# Environment overrides: OPAM_SWITCH (5.2.0+ox), DUNE_BUILD_DIR
-# (<root>/_build-market-maker), SEED (42), PORT (a free port), LOG_DIR (a temporary
-# directory).
+# Environment overrides: WORKSPACE (<root>, the parent of this checkout; any dune
+# workspace holding market-maker and the siblings, e.g. one of symlinks), OPAM_SWITCH
+# (5.2.0+ox), DUNE_BUILD_DIR (<root>/_build-market-maker), SEED (42), PORT (a free port),
+# LOG_DIR (a temporary directory). The final report is also written to
+# LOG_DIR/report.txt.
 set -euo pipefail
 
 usage() {
@@ -36,7 +38,7 @@ if [[ $# -ge 1 && "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-root="$(cd "$repo/.." && pwd)"
+root="${WORKSPACE:-$(cd "$repo/.." && pwd)}"
 if [[ ! -d "$root/$sim" ]]; then
   echo "e2e: $root/$sim is missing; clone it next to market-maker" >&2
   exit 1
@@ -54,7 +56,7 @@ log_dir="${LOG_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/market-maker-e2e.XXXXXX")}"
 mkdir -p "$log_dir"
 
 echo "e2e: building $sim and market-maker (switch $switch)" >&2
-(cd "$repo" && opam exec --switch "$switch" -- dune build "../$sim/bin/main.exe" ./bin/main.exe)
+(cd "$root" && opam exec --switch "$switch" -- dune build --root . "$sim/bin/main.exe" market-maker/bin/main.exe)
 build="$DUNE_BUILD_DIR/default"
 sim_exe="$build/$sim/bin/main.exe"
 mm_exe="$build/market-maker/bin/main.exe"
@@ -106,11 +108,12 @@ sleep 2
 
 echo "e2e: running market-maker on $venue for ${run_for}s, log $log_dir/mm.log" >&2
 "$mm_exe" -venue "$venue" -network local -base-url "$base_url" -run-for "$run_for" "$@" \
-  2>"$log_dir/mm.log" &
+  >"$log_dir/report.txt" 2>"$log_dir/mm.log" &
 mm_pid=$!
 status=0
 wait "$mm_pid" || status=$?
 mm_pid=""
+cat "$log_dir/report.txt"
 if [[ $status -ne 0 ]]; then
   echo "e2e: market-maker exited with $status; last log lines:" >&2
   tail -20 "$log_dir/mm.log" >&2
