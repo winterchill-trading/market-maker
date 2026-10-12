@@ -107,13 +107,13 @@ let%expect_test "params reloads: rejected, applied, unchanged" =
         (Fake_venue.resting venue : Exchange_core.Open_order.t list)];
   [%expect
     {|
-    (starting(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 2)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1000)(order_ttl_ms 60000)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5000)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
+    (starting(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 2)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1s)(order_ttl_ms 1m)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5s)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
     (mode(from(Pulled No_market_data))(to_ Running))
     plan #1 gen 1: cancel 0, keep 0, place [buy 0.001@99970 buy 0.001@99950 sell 0.001@100030 sell 0.001@100050]
     --- started
     ("params rejected, keeping the current ones"(error("invalid params"(errors("levels must be in [1, 255]")))))
     --- levels 0 is rejected
-    ("params updated"(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 1)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1000)(order_ttl_ms 60000)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5000)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
+    ("params updated"(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 1)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1s)(order_ttl_ms 1m)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5s)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
     ("params reloaded"(changes((levels 1))))
     plan #2 gen 1: cancel 2, keep 2, place []
     --- levels 1 applies
@@ -160,7 +160,7 @@ let%expect_test "a shadow with one level logs its differing plans" =
        (String.split_lines (Market_maker.Session.Outcome.to_string_hum outcome)));
   [%expect
     {|
-    (starting(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 2)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1000)(order_ttl_ms 60000)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5000)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
+    (starting(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 2)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1s)(order_ttl_ms 1m)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5s)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
     shadow plan differs: live cancel 0, keep 0, place [buy 0.001@99970 buy 0.001@99950 sell 0.001@100030 sell 0.001@100050] | shadow cancel 0, keep 0, place [buy 0.001@99970 sell 0.001@100030]
     (mode(from(Pulled No_market_data))(to_ Running))
     plan #1 gen 1: cancel 0, keep 0, place [buy 0.001@99970 buy 0.001@99950 sell 0.001@100030 sell 0.001@100050]
@@ -324,7 +324,7 @@ let reconnect_burst ~reconnect =
       { (Mm_core.Params.for_instrument instrument ~mid) with
         levels
       ; max_actions_per_sec = 40
-      ; action_rate_grace_ms = 1_000
+      ; action_rate_grace_ms = Time_ns.Span.of_int_ms 1_000
       }
   in
   let stop = Ivar.create () in

@@ -103,7 +103,10 @@ let%expect_test "updating the shadow to the live parameters keeps its state" =
 
 let%expect_test "a requote burst right after on_resync halts neither strategy" =
   let live =
-    { Mm_core.Params.btc with max_actions_per_sec = 40; action_rate_grace_ms = 1_000 }
+    { Mm_core.Params.btc with
+      max_actions_per_sec = 40
+    ; action_rate_grace_ms = Time_ns.Span.of_int_ms 1_000
+    }
   in
   let burst ~resync =
     let t = Shadow.create ~live ~shadow:{ live with levels = 1 } in

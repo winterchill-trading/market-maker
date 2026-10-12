@@ -155,7 +155,10 @@ let%expect_test "file round trip" =
 
 let%expect_test "a resync before a requote burst replays; without it the burst halts" =
   let params =
-    { Mm_core.Params.btc with max_actions_per_sec = 40; action_rate_grace_ms = 1_000 }
+    { Mm_core.Params.btc with
+      max_actions_per_sec = 40
+    ; action_rate_grace_ms = Time_ns.Span.of_int_ms 1_000
+    }
   in
   let events = Queue.create () in
   let log = Strategy_log.of_writer (Queue.enqueue events) ~params in
