@@ -113,12 +113,9 @@ let%expect_test "params reloads: rejected, applied, unchanged" =
     --- started
     ("params rejected, keeping the current ones"(error("invalid params"(errors("levels must be in [1, 255]")))))
     --- levels 0 is rejected
-    ("params reloaded, restarting the loop"(changes((levels 1))))
-    stopping
-    shutdown: cancelling 4 resting orders
-    (starting(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 1)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1000)(order_ttl_ms 60000)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5000)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
-    (mode(from(Pulled No_market_data))(to_ Running))
-    plan #1 gen 1: cancel 0, keep 0, place [buy 0.001@99970 sell 0.001@100030]
+    ("params updated"(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 1)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1000)(order_ttl_ms 60000)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5000)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
+    ("params reloaded"(changes((levels 1))))
+    plan #2 gen 1: cancel 2, keep 2, place []
     --- levels 1 applies
     params reload: nothing changed
     --- same again
@@ -198,8 +195,8 @@ let%expect_test "the strategy log of a session replays to the same plans" =
       ~summary_interval:(Time_ns.Span.of_int_sec 60)
       ~stop:(Ivar.read stop)
   in
-  (* Opening the log file runs in a thread, outside the synthetic clock: wait on the
-     wall clock for the first quotes before driving the session. *)
+  (* Opening the log file runs in a thread, outside the synthetic clock: wait on the wall
+     clock for the first quotes before driving the session. *)
   let%bind () =
     Session_helpers.wait_until ~what:"first quotes" (fun () ->
       not (List.is_empty (Fake_venue.resting venue)))
@@ -243,7 +240,7 @@ let%expect_test "the strategy log of a session replays to the same plans" =
     {|
     ((outcome.reloads 1) ("(outcome.report).fills" 4) (params_lines 2)
      (fills_logged 4))
-    ((ticks 65) (plans 7) (mismatches ()))
+    ((ticks 60) (plans 10) (mismatches ()))
     |}];
   return ()
 ;;

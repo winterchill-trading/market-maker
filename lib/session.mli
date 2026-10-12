@@ -1,9 +1,10 @@
 (** One run of the strategy on a venue: [Mm_core.Live.Make (V)] with the extras the binary
     needs: tick-to-order latency in the outcome, and parameter reloads.
 
-    A reload stops the live loop (which cancels every resting order) and starts a new one
-    with the new parameters on the same connection ({!Restartable_venue}), so quotes are
-    off the book for the time of one cancel-all and one snapshot. *)
+    A reload hands the new parameters to the running loop ([Mm_core.Live.update_params]):
+    no restart and no cancel-all; the next tick requotes and the reconciler keeps the
+    resting orders that still match. The venue is wrapped in {!Restartable_venue} so the
+    shadow strategy and the strategy log see the loop's inputs. *)
 
 open! Core
 open! Async
@@ -14,8 +15,7 @@ module Outcome : sig
     { report : Mm_core.Live.Report.t
     ; tick_to_order : Mm_core.Latency_histogram.Stats.t option
     (** from a book update to the plan it led to being sent; [None] when no plan followed
-        a book update. After reloads, the count is the total and the percentiles are the
-        largest over the loops (an upper bound). *)
+        a book update *)
     ; reloads : int (** parameter changes applied *)
     ; shadow : Shadow.Stats.t option (** with [shadow_params] *)
     }
@@ -33,8 +33,9 @@ module Make (V : Mm_core.Venue.S) : sig
 
       Every value read from [reload] calls [params] again (with the same instrument and
       first mid). An error is logged and the current parameters stay; parameters equal to
-      the current ones are ignored; others restart the loop with them. The report of a run
-      with reloads adds up counts, volume, realized PnL and fees over the loops.
+      the current ones are ignored; others go to the running loop. When the loop rejects
+      them (another symbol, invalid values) the error is logged and the current parameters
+      stay.
 
       With [shadow_params], a {!Shadow} strategy runs on the same inputs with those
       parameters (built like [params], and read again on every reload) and its differing
