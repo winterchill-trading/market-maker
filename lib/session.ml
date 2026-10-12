@@ -38,16 +38,6 @@ module Make (V : Mm_core.Venue.S) = struct
   module Venue = Restartable_venue.Make (V)
   module Live = Mm_core.Live.Make (Venue)
 
-  let prepare ?time_source venue ~symbol ~params =
-    let open Deferred.Or_error.Let_syntax in
-    let%bind instrument = Venue.instrument venue symbol in
-    let%bind mid = Live.first_mid ?time_source venue symbol in
-    let%map params =
-      Deferred.return (Or_error.try_with_join (fun () -> params instrument ~mid))
-    in
-    instrument, mid, params
-  ;;
-
   (* [`Stop] once [stop] is determined, else [`Reload] for each value on [reload]. *)
   let next_event ~stop ~reload =
     let reload_requested =
@@ -78,18 +68,12 @@ module Make (V : Mm_core.Venue.S) = struct
       ; mutable current : Mm_core.Params.t
       }
 
-    let create venue ~time_source ~params ~live ~instrument ~mid =
+    let create ~params ~live ~instrument ~mid =
       let%map.Or_error current =
         Or_error.try_with_join (fun () -> params instrument ~mid)
         |> Or_error.tag ~tag:"shadow params"
       in
-      let shadow = Shadow.create ~live ~shadow:current in
-      Venue.add_observer venue (fun input ->
-        Shadow.on_input
-          shadow
-          input
-          ~now:(Time_ns.to_int_ns_since_epoch (Time_source.now time_source)));
-      { shadow; params; current }
+      { shadow = Shadow.create ~live ~shadow:current; params; current }
     ;;
 
     (* Re-reads the shadow parameters; updates both shadow strategies in place when they
@@ -121,6 +105,28 @@ module Make (V : Mm_core.Venue.S) = struct
     ;;
   end
 
+  (* What the parameters callback builds before the loop starts: the observers that mirror
+     the strategy see every input the loop sees, from its first snapshots on. *)
+  module Prepared = struct
+    type t =
+      { instrument : Instrument.t
+      ; mid : Price.t
+      ; first_params : Mm_core.Params.t
+      ; shadow : Shadow_run.t option
+      ; log : Strategy_log.t option
+      }
+
+    let on_input t input ~now =
+      Option.iter t.shadow ~f:(fun s -> Shadow.on_input s.shadow input ~now);
+      Option.iter t.log ~f:(fun log -> Strategy_log.on_input log input ~now)
+    ;;
+
+    let on_resync t ~now =
+      Option.iter t.shadow ~f:(fun s -> Shadow.on_resync s.shadow ~now);
+      Option.iter t.log ~f:(fun log -> Strategy_log.on_resync log ~now)
+    ;;
+  end
+
   let connect_and_run
     ?(time_source = Time_source.wall_clock ())
     ?(reload = Pipe.empty ())
@@ -132,56 +138,71 @@ module Make (V : Mm_core.Venue.S) = struct
     ~summary_interval
     ~stop
     =
-    let%bind.Deferred.Or_error venue = Venue.connect config in
-    let fail error =
-      let%map () = Venue.shutdown venue in
-      Error error
+    let now () = Time_ns.to_int_ns_since_epoch (Time_source.now time_source) in
+    (* The log file opens before connecting, so that the log can start inside the
+       parameters callback, before the loop takes its first snapshots. *)
+    let%bind.Deferred.Or_error log_writer =
+      match strategy_log with
+      | None -> Deferred.Or_error.return None
+      | Some path ->
+        Monitor.try_with_or_error (fun () -> Writer.open_file path)
+        >>| Or_error.map ~f:Option.some
     in
-    let start params =
-      Live.start ~time_source venue { Mm_core.Live.Config.params; summary_interval }
+    let venue = ref None in
+    let prepared = ref None in
+    let on_venue v =
+      venue := Some v;
+      Venue.add_observer v (fun input ->
+        Option.iter !prepared ~f:(fun p -> Prepared.on_input p input ~now:(now ())))
     in
-    let prepared =
-      let open Deferred.Or_error.Let_syntax in
-      let%bind instrument, mid, first_params =
-        prepare ~time_source venue ~symbol ~params
-      in
+    let params_and_observers instrument ~mid =
+      let open Or_error.Let_syntax in
+      let%bind first_params = Or_error.try_with_join (fun () -> params instrument ~mid) in
       let%map shadow =
         match shadow_params with
         | None -> return None
         | Some params ->
-          Shadow_run.create venue ~time_source ~params ~live:first_params ~instrument ~mid
-          |> Or_error.map ~f:Option.some
-          |> Deferred.return
+          Shadow_run.create ~params ~live:first_params ~instrument ~mid >>| Option.some
       in
-      instrument, mid, first_params, shadow
+      let log =
+        Option.map log_writer ~f:(fun writer ->
+          Strategy_log.of_file_writer writer ~params:first_params)
+      in
+      prepared := Some { Prepared.instrument; mid; first_params; shadow; log };
+      first_params
     in
-    match%bind prepared with
-    | Error error -> fail error
-    | Ok (instrument, mid, first_params, shadow) ->
-      let%bind strategy_log =
-        match strategy_log with
-        | None -> return None
-        | Some path ->
-          let%map log = Strategy_log.create path ~params:first_params in
-          Venue.add_observer venue (fun input ->
-            Strategy_log.on_input
-              log
-              input
-              ~now:(Time_ns.to_int_ns_since_epoch (Time_source.now time_source)));
-          Some log
+    let close_log () = Option.value_map log_writer ~default:(return ()) ~f:Writer.close in
+    (* The loop closes the venue on every path, but closing a {!Restartable_venue} does
+       nothing: the connection goes down here. *)
+    let shutdown () =
+      let%bind () = Option.value_map !venue ~default:(return ()) ~f:Venue.shutdown in
+      close_log ()
+    in
+    match%bind
+      Live.connect_and_start
+        ~time_source
+        ~on_venue
+        config
+        ~symbol
+        ~params:params_and_observers
+        ~summary_interval
+    with
+    | Error error ->
+      let%map () = shutdown () in
+      Error error
+    | Ok live ->
+      let ({ Prepared.instrument; mid; first_params; shadow; log = strategy_log } as
+           prepared)
+        =
+        Option.value_exn !prepared
       in
-      let close_log () =
-        Option.value_map strategy_log ~default:(return ()) ~f:Strategy_log.close
-      in
-      let fail error =
-        let%bind () = close_log () in
-        fail error
-      in
+      (* Mirror strategies start the same action rate grace period as the loop's own on
+         every venue reconnect. *)
+      Live.on_resync live ~f:(fun () -> Prepared.on_resync prepared ~now:(now ()));
       let finish ~reloads live =
         let%bind report = Live.stop live in
         let tick_to_order = Live.tick_to_order live in
-        let%bind () = Venue.shutdown venue in
-        let%map () = close_log () in
+        let%map () = shutdown () in
         Ok
           { Outcome.report
           ; tick_to_order
@@ -230,8 +251,6 @@ module Make (V : Mm_core.Venue.S) = struct
                       [%message "strategy log: params update failed" (error : Error.t)]);
                 loop live ~current:next ~reloads:(reloads + 1)))
       in
-      (match%bind start first_params with
-       | Error error -> fail error
-       | Ok live -> loop live ~current:first_params ~reloads:0)
+      loop live ~current:first_params ~reloads:0
   ;;
 end
