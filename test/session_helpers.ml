@@ -38,3 +38,17 @@ let advance_until time_source d =
   in
   loop 600
 ;;
+
+let wait_until ~what f =
+  let rec loop n =
+    let%bind () = Scheduler.yield_until_no_jobs_remain () in
+    if f ()
+    then return ()
+    else if n = 0
+    then raise_s [%message "timed out waiting" what]
+    else (
+      let%bind () = Clock_ns.after (Time_ns.Span.of_int_ms 1) in
+      loop (n - 1))
+  in
+  loop 10_000
+;;

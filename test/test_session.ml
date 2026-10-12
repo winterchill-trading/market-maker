@@ -198,6 +198,12 @@ let%expect_test "the strategy log of a session replays to the same plans" =
       ~summary_interval:(Time_ns.Span.of_int_sec 60)
       ~stop:(Ivar.read stop)
   in
+  (* Opening the log file runs in a thread, outside the synthetic clock: wait on the
+     wall clock for the first quotes before driving the session. *)
+  let%bind () =
+    Session_helpers.wait_until ~what:"first quotes" (fun () ->
+      not (List.is_empty (Fake_venue.resting venue)))
+  in
   let%bind () =
     Deferred.List.iter
       ~how:`Sequential
@@ -235,9 +241,9 @@ let%expect_test "the strategy log of a session replays to the same plans" =
   print_s [%sexp (ok_exn (Strategy_log.Replay.run events) : Strategy_log.Replay.t)];
   [%expect
     {|
-    ((outcome.reloads 1) ("(outcome.report).fills" 3) (params_lines 2)
-     (fills_logged 3))
-    ((ticks 57) (plans 6) (mismatches ()))
+    ((outcome.reloads 1) ("(outcome.report).fills" 4) (params_lines 2)
+     (fills_logged 4))
+    ((ticks 65) (plans 7) (mismatches ()))
     |}];
   return ()
 ;;
