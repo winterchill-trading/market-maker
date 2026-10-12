@@ -1,0 +1,111 @@
+# Builds and tests against the current main of every sibling once a day, so an upstream
+# change that breaks market-maker shows up without a push here, and once a week runs the
+# end-to-end script on all three simulators. The pins are the ones in ci.yml.
+name: nightly
+on:
+  schedule:
+    - cron: "17 2 * * *" # build and test, daily
+    - cron: "17 3 * * 1" # e2e-all.sh, Mondays
+  workflow_dispatch:
+    inputs:
+      e2e:
+        description: "also run e2e-all.sh"
+        type: boolean
+        default: true
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  PINS: |
+    fixed-decimal https://github.com/winterchill-trading/fixed-decimal.git
+    exchange-core https://github.com/winterchill-trading/exchange-core.git
+    parquet https://github.com/winterchill-trading/parquet.git
+    market-data https://github.com/winterchill-trading/market-data.git
+    hl-protocol https://github.com/winterchill-trading/hl-protocol.git
+    venue-net https://github.com/winterchill-trading/venue-net.git
+    hl-client https://github.com/winterchill-trading/hl-client.git
+    mm-core https://github.com/winterchill-trading/mm-core.git
+    hl-mm https://github.com/winterchill-trading/hl-mm.git
+    binance-protocol https://github.com/winterchill-trading/binance-protocol.git
+    binance-client https://github.com/winterchill-trading/binance-client.git
+    bybit-protocol https://github.com/winterchill-trading/bybit-protocol.git
+    bybit-client https://github.com/winterchill-trading/bybit-client.git
+    order-book https://github.com/winterchill-trading/order-book.git
+    exchange-core-engine https://github.com/winterchill-trading/exchange-core.git
+    price-anchor https://github.com/winterchill-trading/price-anchor.git
+    hl-sim https://github.com/winterchill-trading/hl-sim.git
+jobs:
+  upstream-main:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 2 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install duckdb CLI (the order log query test runs it)
+        run: |
+          curl -sSL -o /tmp/duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-linux-amd64.zip
+          sudo unzip -o /tmp/duckdb.zip -d /usr/local/bin
+      - id: ox
+        uses: winterchill-trading/infra/.github/actions/ox-setup@main
+        with:
+          pins: ${{ env.PINS }}
+      - run: sudo apt-get install -y libsecp256k1-dev
+      - run: opam exec -- dune build
+      - run: opam exec -- dune test
+      - name: Pinned commits
+        if: always()
+        run: cat _opam/.ox-setup-pins || true
+
+  e2e-all:
+    if: >-
+      github.event.schedule == '17 3 * * 1'
+      || (github.event_name == 'workflow_dispatch' && inputs.e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      # A dune workspace holding market-maker and the three simulators; every other
+      # sibling comes from the pinned opam switch.
+      - uses: actions/checkout@v4
+        with:
+          path: ws/market-maker
+      - uses: actions/checkout@v4
+        with:
+          repository: winterchill-trading/hl-sim
+          path: ws/hl-sim
+      - uses: actions/checkout@v4
+        with:
+          repository: winterchill-trading/binance-sim
+          path: ws/binance-sim
+      - uses: actions/checkout@v4
+        with:
+          repository: winterchill-trading/bybit-sim
+          path: ws/bybit-sim
+      - name: Workspace root and the opam files whose dependencies to install
+        run: |
+          echo '(lang dune 3.17)' > ws/dune-workspace
+          mkdir -p e2e-deps
+          cp ws/market-maker/*.opam ws/binance-sim/*.opam ws/bybit-sim/*.opam e2e-deps/
+      - uses: winterchill-trading/infra/.github/actions/ox-setup@main
+        with:
+          working-directory: e2e-deps
+          pins: ${{ env.PINS }}
+      - run: sudo apt-get install -y libsecp256k1-dev
+      - name: e2e-all.sh 30
+        env:
+          WORKSPACE: ${{ github.workspace }}/ws
+          OPAM_SWITCH: ${{ github.workspace }}
+          LOG_DIR: ${{ github.workspace }}/e2e-logs
+        run: |
+          mkdir -p "$LOG_DIR"
+          set -o pipefail
+          ws/market-maker/scripts/e2e-all.sh 30 2>&1 | tee "$LOG_DIR/e2e-all.txt"
+      - name: Latency and cycle tables
+        if: always()
+        run: |
+          sed -n '/^--- tick-to-order latency ---$/,$p' e2e-logs/e2e-all.txt \
+            | tee e2e-logs/latency.txt >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-all-${{ github.run_id }}
+          path: e2e-logs
+          retention-days: 30
