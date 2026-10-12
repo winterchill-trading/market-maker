@@ -17,11 +17,12 @@ module Outcome : sig
         a book update. After reloads, the count is the total and the percentiles are the
         largest over the loops (an upper bound). *)
     ; reloads : int (** parameter changes applied *)
+    ; shadow : Shadow.Stats.t option (** with [shadow_params] *)
     }
   [@@deriving sexp_of]
 
-  (** The live report followed by a [tick-to-order] line (and a [params reloads] line
-      after reloads). *)
+  (** The live report followed by a [tick-to-order] line (and [params reloads] and
+      [shadow plans] lines after reloads and with a shadow). *)
   val to_string_hum : t -> string
 end
 
@@ -33,10 +34,16 @@ module Make (V : Mm_core.Venue.S) : sig
       Every value read from [reload] calls [params] again (with the same instrument and
       first mid). An error is logged and the current parameters stay; parameters equal to
       the current ones are ignored; others restart the loop with them. The report of a run
-      with reloads adds up counts, volume, realized PnL and fees over the loops. *)
+      with reloads adds up counts, volume, realized PnL and fees over the loops.
+
+      With [shadow_params], a {!Shadow} strategy runs on the same inputs with those
+      parameters (built like [params], and read again on every reload) and its differing
+      plans are logged; an error at start fails the run, on reload it keeps the current
+      shadow parameters. *)
   val connect_and_run
     :  ?time_source:Time_source.t
     -> ?reload:unit Pipe.Reader.t
+    -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> V.config
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)

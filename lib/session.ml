@@ -9,6 +9,7 @@ module Outcome = struct
     { report : Report.t
     ; tick_to_order : Stats.t option
     ; reloads : int
+    ; shadow : Shadow.Stats.t option
     }
   [@@deriving sexp_of]
 
@@ -20,7 +21,9 @@ module Outcome = struct
            "tick-to-order    %s"
            (Option.value_map t.tick_to_order ~default:"-" ~f:Stats.to_string_hum)
        ]
-       @ if t.reloads > 0 then [ sprintf "params reloads   %d" t.reloads ] else [])
+       @ (if t.reloads > 0 then [ sprintf "params reloads   %d" t.reloads ] else [])
+       @ Option.value_map t.shadow ~default:[] ~f:(fun (s : Shadow.Stats.t) ->
+         [ sprintf "shadow plans     %d of %d differ" s.differing s.plans ]))
   ;;
 end
 
@@ -105,9 +108,57 @@ module Make (V : Mm_core.Venue.S) = struct
         `Reload)
   ;;
 
+  (* The shadow strategy, when there is one, and its current parameters. *)
+  module Shadow_run = struct
+    type t =
+      { shadow : Shadow.t
+      ; params : Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t
+      ; mutable current : Mm_core.Params.t
+      }
+
+    let create venue ~time_source ~params ~live ~instrument ~mid =
+      let%map.Or_error current =
+        Or_error.try_with_join (fun () -> params instrument ~mid)
+        |> Or_error.tag ~tag:"shadow params"
+      in
+      let shadow = Shadow.create ~live ~shadow:current in
+      Venue.add_observer venue (fun input ->
+        Shadow.on_input
+          shadow
+          input
+          ~now:(Time_ns.to_int_ns_since_epoch (Time_source.now time_source)));
+      { shadow; params; current }
+    ;;
+
+    (* Re-reads the shadow parameters; restarts the shadow when they or the live ones
+       changed. *)
+    let reload t ~live ~live_changed ~instrument ~mid =
+      let next =
+        match Or_error.try_with_join (fun () -> t.params instrument ~mid) with
+        | Ok next -> next
+        | Error error ->
+          Log.Global.error_s
+            [%message
+              "shadow params rejected, keeping the current ones" (error : Error.t)];
+          t.current
+      in
+      if live_changed || not (Mm_core.Params.equal next t.current)
+      then (
+        if not (Mm_core.Params.equal next t.current)
+        then
+          Log.Global.info_s
+            [%message
+              "shadow params reloaded"
+                ~changes:(changed_fields t.current next : Sexp.t list)];
+        t.current <- next;
+        Shadow.restart t.shadow ~live ~shadow:next)
+    ;;
+  end
+
   let connect_and_run
-    ?time_source
+    ?(time_source = Time_source.wall_clock ())
     ?(reload = Pipe.empty ())
+    ?shadow_params
     config
     ~symbol
     ~params
@@ -120,11 +171,26 @@ module Make (V : Mm_core.Venue.S) = struct
       Error error
     in
     let start params =
-      Live.start ?time_source venue { Mm_core.Live.Config.params; summary_interval }
+      Live.start ~time_source venue { Mm_core.Live.Config.params; summary_interval }
     in
-    match%bind prepare ?time_source venue ~symbol ~params with
+    let prepared =
+      let open Deferred.Or_error.Let_syntax in
+      let%bind instrument, mid, first_params =
+        prepare ~time_source venue ~symbol ~params
+      in
+      let%map shadow =
+        match shadow_params with
+        | None -> return None
+        | Some params ->
+          Shadow_run.create venue ~time_source ~params ~live:first_params ~instrument ~mid
+          |> Or_error.map ~f:Option.some
+          |> Deferred.return
+      in
+      instrument, mid, first_params, shadow
+    in
+    match%bind prepared with
     | Error error -> fail error
-    | Ok (instrument, mid, first_params) ->
+    | Ok (instrument, mid, first_params, shadow) ->
       let finish ~past ~reloads live =
         let%bind report = Live.stop live in
         let report, tick_to_order =
@@ -135,7 +201,16 @@ module Make (V : Mm_core.Venue.S) = struct
             , merge_stats past_stats (Live.tick_to_order live) )
         in
         let%map () = Venue.shutdown venue in
-        Ok { Outcome.report; tick_to_order; reloads }
+        Ok
+          { Outcome.report
+          ; tick_to_order
+          ; reloads
+          ; shadow = Option.map shadow ~f:(fun s -> Shadow.stats s.shadow)
+          }
+      in
+      let reload_shadow ~live ~live_changed =
+        Option.iter shadow ~f:(fun shadow ->
+          Shadow_run.reload shadow ~live ~live_changed ~instrument ~mid)
       in
       let rec loop live ~current ~past ~reloads =
         match%bind next_event ~stop ~reload with
@@ -145,9 +220,11 @@ module Make (V : Mm_core.Venue.S) = struct
            | Error error ->
              Log.Global.error_s
                [%message "params rejected, keeping the current ones" (error : Error.t)];
+             reload_shadow ~live:current ~live_changed:false;
              loop live ~current ~past ~reloads
            | Ok next when Mm_core.Params.equal next current ->
              Log.Global.info "params reload: nothing changed";
+             reload_shadow ~live:current ~live_changed:false;
              loop live ~current ~past ~reloads
            | Ok next ->
              Log.Global.info_s
@@ -162,6 +239,7 @@ module Make (V : Mm_core.Venue.S) = struct
                | Some (r, s) -> Some (merge_reports r report, merge_stats s stats)
              in
              Venue.next_loop venue;
+             reload_shadow ~live:next ~live_changed:true;
              (match%bind start next with
               | Error error -> fail error
               | Ok live -> loop live ~current:next ~past ~reloads:(reloads + 1)))

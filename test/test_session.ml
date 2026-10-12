@@ -129,3 +129,50 @@ let%expect_test "params reloads: rejected, applied, unchanged" =
     |}];
   return ()
 ;;
+
+let%expect_test "a shadow with one level logs its differing plans" =
+  Session_helpers.print_logs ();
+  let time_source = Time_source.create ~now:Session_helpers.start_time () in
+  let venue = Fake_venue.create ~time_source:(Time_source.read_only time_source) () in
+  Fake_venue.push_book venue ~bid:"99990" ~ask:"100010";
+  let with_overrides overrides instrument ~mid =
+    Params_file.apply
+      (Mm_core.Params.for_instrument instrument ~mid)
+      ~overrides:(Sexp.of_string overrides)
+  in
+  let stop = Ivar.create () in
+  let outcome =
+    Session.connect_and_run
+      ~time_source:(Time_source.read_only time_source)
+      ~shadow_params:(with_overrides "((levels 1))")
+      venue
+      ~symbol:Fake_venue.btc
+      ~params:(with_overrides "((levels 2))")
+      ~summary_interval:(Time_ns.Span.of_int_sec 60)
+      ~stop:(Ivar.read stop)
+  in
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 500) in
+  Fake_venue.push_book venue ~bid:"100090" ~ask:"100110";
+  let%bind () = Session_helpers.advance time_source (Time_ns.Span.of_int_ms 1500) in
+  Ivar.fill_exn stop ();
+  let%bind outcome = Session_helpers.advance_until time_source outcome in
+  let%bind () = Log.Global.flushed () in
+  let outcome = ok_exn outcome in
+  print_endline
+    (List.last_exn
+       (String.split_lines (Market_maker.Session.Outcome.to_string_hum outcome)));
+  [%expect
+    {|
+    (starting(params((symbol BTC)(tick 1)(lot 0.00001)(order_size 0.001)(levels 2)(base_half_spread_bps 3)(level_spacing_bps 2)(skew_bps 4)(max_position 0.01)(max_notional 1500)(inventory_target 0)(requote_threshold_bps 1)(requote_interval_ms 1000)(order_ttl_ms 60000)(gamma 0.5)(vol_window 100)(max_vol_bps 10)(max_drawdown 50)(max_data_age_ms 5000)(flatten_slippage_bps 50)(max_actions_per_sec 100)(soft_max_position())(bump_budget 0))))
+    shadow plan differs: live cancel 0, keep 0, place [buy 0.001@99970 buy 0.001@99950 sell 0.001@100030 sell 0.001@100050] | shadow cancel 0, keep 0, place [buy 0.001@99970 sell 0.001@100030]
+    (mode(from(Pulled No_market_data))(to_ Running))
+    plan #1 gen 1: cancel 0, keep 0, place [buy 0.001@99970 buy 0.001@99950 sell 0.001@100030 sell 0.001@100050]
+    shadow plan differs: live cancel 4, keep 0, place [buy 0.001@99819 buy 0.001@99799 sell 0.001@100381 sell 0.001@100401] | shadow cancel 4, keep 0, place [buy 0.001@99819 sell 0.001@100381]
+    plan #2 gen 2: cancel 4, keep 0, place [buy 0.001@99819 buy 0.001@99799 sell 0.001@100381 sell 0.001@100401]
+    shadow plan differs: live cancel 0, keep 0, place [] | shadow cancel 2, keep 2, place []
+    stopping
+    shutdown: cancelling 4 resting orders
+    shadow plans     3 of 3 differ
+    |}];
+  return ()
+;;
