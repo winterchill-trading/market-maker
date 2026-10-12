@@ -3,6 +3,16 @@ open! Async
 
 let start_time = Time_ns.of_int_ns_since_epoch 1_800_000_000_000_000_000
 
+let print_logs () =
+  Log.Global.set_output
+    [ Log.Output.create
+        ~flush:(fun () -> return ())
+        (fun messages ->
+          Queue.iter messages ~f:(fun m -> print_endline (Log.Message.message m));
+          return ())
+    ]
+;;
+
 let advance time_source span =
   let step = Time_ns.Span.of_int_ms 10 in
   let rec loop left =

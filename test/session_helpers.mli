@@ -5,6 +5,9 @@ open! Async
 
 val start_time : Time_ns.t
 
+(** Sends [Log.Global] messages to stdout, without times or levels. *)
+val print_logs : unit -> unit
+
 (** Advances the clock by [span] in 10 ms steps, running every job in between. *)
 val advance : Time_source.Read_write.t -> Time_ns.Span.t -> unit Deferred.t
 

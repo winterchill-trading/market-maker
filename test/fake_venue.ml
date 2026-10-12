@@ -113,7 +113,8 @@ let place t requests =
                 ; orig_size = Some r.size
                 ; order_id
                 ; client_order_id = r.client_order_id
-                ; timestamp = 0
+                ; timestamp =
+                    Time_ns.to_int_ns_since_epoch (Time_source.now t.time_source)
                 }
               ];
          Resting { order_id; client_order_id = r.client_order_id }))
