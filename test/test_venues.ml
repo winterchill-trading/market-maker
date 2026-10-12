@@ -4,11 +4,12 @@ open Market_maker
 
 let env bindings name = List.Assoc.find bindings name ~equal:String.equal
 
-let show ?base_url ?address ?(env_bindings = []) venue ~network =
+let show ?base_url ?address ?allow_mainnet ?(env_bindings = []) venue ~network =
   match
     Venues.runner
       ?base_url:(Option.map base_url ~f:Uri.of_string)
       ?address
+      ?allow_mainnet
       ~getenv:(env env_bindings)
       venue
       ~network
@@ -52,13 +53,13 @@ let%expect_test "local endpoints and base url overrides" =
     {|
     ((venue hyperliquid)
      (endpoint
-      "http://localhost:3000 (account 0x0000000000000000000000000000000000006d6d)"))
+      "http://localhost:3000 (account 0x0000000000000000000000000000000000006d6d, unsigned)"))
     ((venue binance) (endpoint http://localhost:3300))
     ((venue bybit) (endpoint http://localhost:3400))
     ((venue binance) (endpoint http://127.0.0.1:9999))
     ((venue hyperliquid)
      (endpoint
-      "http://localhost:3000 (account 0x00000000000000000000000000000000000000aa)"))
+      "http://localhost:3000 (account 0x00000000000000000000000000000000000000aa, unsigned)"))
     |}];
   return ()
 ;;
@@ -74,7 +75,7 @@ let%expect_test "real networks need credentials" =
     ~env_bindings:[ "BYBIT_API_KEY", "k"; "BYBIT_API_SECRET", "s" ];
   [%expect
     {|
-    "Hyperliquid needs -address or HL_ADDRESS off the simulator"
+    "Hyperliquid needs HL_PRIVATE_KEY (or -address or HL_ADDRESS) off the simulator"
     ("set the API key and secret in the environment" (key_var BINANCE_API_KEY)
      (secret_var BINANCE_API_SECRET))
     ("set the API key and secret in the environment" (key_var BYBIT_API_KEY)
@@ -84,3 +85,4 @@ let%expect_test "real networks need credentials" =
     |}];
   return ()
 ;;
+

@@ -90,7 +90,16 @@ let command =
        flag
          "-address"
          (optional string)
-         ~doc:"ADDRESS Hyperliquid account (default HL_ADDRESS, or a simulator account)"
+         ~doc:
+           "ADDRESS Hyperliquid account (default HL_ADDRESS, the HL_PRIVATE_KEY's, or a \
+            simulator account)"
+     and allow_mainnet =
+       flag
+         "-i-understand-mainnet"
+         no_arg
+         ~doc:
+           " allow signed Hyperliquid orders on mainnet (refused without it; \
+            HL_PRIVATE_KEY set means signed)"
      and symbol =
        flag
          "-symbol"
@@ -192,6 +201,7 @@ let command =
          Venues.runner
            ?base_url:(Option.map base_url ~f:Uri.of_string)
            ?address
+           ~allow_mainnet
            venue
            ~network
          |> Deferred.return
@@ -229,6 +239,7 @@ let command =
        in
        let%map outcome =
          Runner.connect_and_run
+           ?time_source:None
            ?reload
            ?strategy_log
            ?shadow_params:

@@ -71,7 +71,8 @@ module type RUNNER = sig
   val min_notional : Symbol.t -> Usd.t option Or_error.t Deferred.t
 
   val connect_and_run
-    :  ?reload:unit Pipe.Reader.t
+    :  ?time_source:Time_source.t
+    -> ?reload:unit Pipe.Reader.t
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> ?strategy_log:string
     -> symbol:Symbol.t
@@ -86,7 +87,7 @@ let simulator_address = "0x0000000000000000000000000000000000006d6d"
 let local_api_key = "market-maker"
 let hyperliquid_min_notional = Usd.of_int 10
 
-module Hyperliquid_live = Session.Make (Hl_mm.Hl_venue)
+module Hyperliquid_live = Session.Make (Hl_mm.Hl_venue.Trading)
 module Binance_live = Session.Make (Binance_client.Venue)
 module Bybit_live = Session.Make (Bybit_client.Venue)
 
@@ -98,43 +99,89 @@ let parse_address s =
     | _ -> raise_s [%message "expected 0x followed by 40 hex digits" s])
 ;;
 
-let hyperliquid ?base_url ?address ~getenv ~network () =
+let private_key_var = "HL_PRIVATE_KEY"
+
+let private_key ~getenv =
+  match getenv private_key_var with
+  | None | Some "" -> Ok None
+  | Some hex ->
+    (* As [Hl_client.Signing.Private_key.of_env], but through [getenv]. The error leaves
+       out [of_hex]'s, which can quote digits of the key. *)
+    (match Hl_client.Signing.Private_key.of_hex (String.strip hex) with
+     | Ok key -> Ok (Some key)
+     | Error _ ->
+       Or_error.error_s
+         [%message "not a secp256k1 private key (64 hex digits)" ~var:private_key_var])
+;;
+
+let hyperliquid ?base_url ?address ?(allow_mainnet = false) ~getenv ~network () =
   let open Or_error.Let_syntax in
+  let%bind key = private_key ~getenv in
   let%bind address =
-    match Option.first_some address (getenv "HL_ADDRESS"), network with
-    | Some address, _ -> parse_address address
-    | None, Network.Local -> parse_address simulator_address
-    | None, (Testnet | Mainnet) ->
-      Or_error.error_string "Hyperliquid needs -address or HL_ADDRESS off the simulator"
+    match Option.first_some address (getenv "HL_ADDRESS"), key, network with
+    | Some address, _, _ -> parse_address address >>| Option.some
+    | None, Some _, _ -> return None (* the key's address *)
+    | None, None, Network.Local -> parse_address simulator_address >>| Option.some
+    | None, None, (Testnet | Mainnet) ->
+      Or_error.error_string
+        "Hyperliquid needs HL_PRIVATE_KEY (or -address or HL_ADDRESS) off the simulator"
   in
   let config =
     match base_url, (network : Network.t) with
-    | Some base_url, _ -> Hl_client.Config.create ~address ~base_url ()
-    | None, Local -> Hl_client.Config.local ~address ()
-    | None, Testnet -> Hl_client.Config.testnet ~address ()
-    | None, Mainnet -> Hl_client.Config.mainnet ~address ()
+    | Some base_url, _ -> Hl_client.Config.create ?address ~base_url ()
+    | None, Local -> Hl_client.Config.local ?address ()
+    | None, Testnet -> Hl_client.Config.testnet ?address ()
+    | None, Mainnet -> Hl_client.Config.mainnet ?address ()
   in
-  return
-    (module struct
-      let venue = Venue_choice.Hyperliquid
+  let handle = Hl_client.Client.trading ?key config in
+  let signed = Option.is_some key in
+  let mainnet = Network.equal network Mainnet || Hl_client.Client.is_mainnet handle in
+  let%bind () =
+    if signed && mainnet && not allow_mainnet
+    then
+      Or_error.error_s
+        [%message
+          "refusing to sign orders for Hyperliquid mainnet without -i-understand-mainnet"
+            ~base_url:(Uri.to_string config.base_url)]
+    else return ()
+  in
+  let%map account =
+    match (Hl_client.Client.config handle).address with
+    | Some address -> return address
+    | None -> Or_error.error_string "Hyperliquid: no account address"
+  in
+  (module struct
+    let venue = Venue_choice.Hyperliquid
 
-      let endpoint =
-        sprintf
-          "%s (account %s)"
-          (Uri.to_string config.base_url)
-          (Hl_protocol.Address.to_string address)
-      ;;
+    let endpoint =
+      sprintf
+        "%s (account %s, %s)"
+        (Uri.to_string config.base_url)
+        (Hl_protocol.Address.to_string account)
+        (if signed
+         then
+           sprintf
+             "signed for %s"
+             (if Hl_client.Client.is_mainnet handle then "mainnet" else "testnet")
+         else "unsigned")
+    ;;
 
-      let min_notional _ = Deferred.Or_error.return (Some hyperliquid_min_notional)
+    let min_notional _ = Deferred.Or_error.return (Some hyperliquid_min_notional)
 
-      let[@warning "-unerasable-optional-argument"] connect_and_run
+    let[@warning "-unerasable-optional-argument"] connect_and_run
+      ?time_source
+      ?reload
+      ?shadow_params
+      ?strategy_log
+      =
+      Hyperliquid_live.connect_and_run
+        ?time_source
         ?reload
         ?shadow_params
         ?strategy_log
-        =
-        Hyperliquid_live.connect_and_run ?reload ?shadow_params ?strategy_log config
-      ;;
-    end : RUNNER)
+        handle
+    ;;
+  end : RUNNER)
 ;;
 
 (* Testnet and mainnet need real credentials; the simulators take any key. *)
@@ -182,11 +229,17 @@ let binance ?base_url ~getenv ~network () =
     ;;
 
     let[@warning "-unerasable-optional-argument"] connect_and_run
+      ?time_source
       ?reload
       ?shadow_params
       ?strategy_log
       =
-      Binance_live.connect_and_run ?reload ?shadow_params ?strategy_log config
+      Binance_live.connect_and_run
+        ?time_source
+        ?reload
+        ?shadow_params
+        ?strategy_log
+        config
     ;;
   end : RUNNER)
 ;;
@@ -218,18 +271,26 @@ let bybit ?base_url ~getenv ~network () =
     ;;
 
     let[@warning "-unerasable-optional-argument"] connect_and_run
+      ?time_source
       ?reload
       ?shadow_params
       ?strategy_log
       =
-      Bybit_live.connect_and_run ?reload ?shadow_params ?strategy_log config
+      Bybit_live.connect_and_run ?time_source ?reload ?shadow_params ?strategy_log config
     ;;
   end : RUNNER)
 ;;
 
-let runner ?base_url ?address ?(getenv = Sys.getenv) (venue : Venue_choice.t) ~network =
+let runner
+  ?base_url
+  ?address
+  ?allow_mainnet
+  ?(getenv = Sys.getenv)
+  (venue : Venue_choice.t)
+  ~network
+  =
   match venue with
-  | Hyperliquid -> hyperliquid ?base_url ?address ~getenv ~network ()
+  | Hyperliquid -> hyperliquid ?base_url ?address ?allow_mainnet ~getenv ~network ()
   | Binance -> binance ?base_url ~getenv ~network ()
   | Bybit -> bybit ?base_url ~getenv ~network ()
 ;;

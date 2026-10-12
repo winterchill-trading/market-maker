@@ -53,7 +53,8 @@ module type RUNNER = sig
 
   (** [Session.Make (V).connect_and_run] with the bound configuration. *)
   val connect_and_run
-    :  ?reload:unit Pipe.Reader.t
+    :  ?time_source:Time_source.t
+    -> ?reload:unit Pipe.Reader.t
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> ?strategy_log:string
     -> symbol:Symbol.t
@@ -66,8 +67,15 @@ end
 (** Builds the configuration and picks the adapter.
 
     - [base_url] overrides the network's REST root (websocket URLs are derived from it).
-    - Hyperliquid acts for [address], else [HL_ADDRESS], else (local only) a fixed
-      simulator address. Requests are unsigned (the simulator's [X-Address] convention).
+    - Hyperliquid signs exchange requests when [HL_PRIVATE_KEY] holds a key (through
+      [Hl_mm.Hl_venue.Trading]; the signing domain is testnet unless the REST root is
+      [api.hyperliquid.xyz]). It acts for [address], else [HL_ADDRESS], else the key's
+      address, else (local only) a fixed simulator address. Without a key requests are
+      unsigned (the simulator's [X-Address] convention).
+    - Signing for Hyperliquid mainnet ([network = Mainnet] or a mainnet REST root) is
+      refused unless [allow_mainnet] (default [false], the binary's
+      [-i-understand-mainnet]). No default points a signed run at mainnet: the binary's
+      network defaults to [Local].
     - Binance reads [BINANCE_API_KEY] and [BINANCE_API_SECRET], Bybit [BYBIT_API_KEY] and
       [BYBIT_API_SECRET]. Testnet and mainnet need both; locally the key defaults to
       ["market-maker"] (the simulators use it as the account) and the secret is optional.
@@ -76,6 +84,7 @@ end
 val runner
   :  ?base_url:Uri.t
   -> ?address:string
+  -> ?allow_mainnet:bool
   -> ?getenv:(string -> string option)
   -> Venue_choice.t
   -> network:Network.t
