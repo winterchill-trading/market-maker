@@ -37,22 +37,25 @@
  (preprocess
   (pps ppx_jane)))
 
-; A Bonsai_term prototype; built only where bonsai_term is installed.
+; A Bonsai_term prototype. Without bonsai_term installed (it is not an opam dependency)
+; the terminal view is replaced by a stub and only -once works.
 
 (executable
  (name status_viewer)
  (public_name market-maker-status)
  (package market-maker)
- (optional)
- (modules status_viewer)
+ (modules status_viewer status_tui)
  (libraries
   async
-  bonsai
-  bonsai_term
   core
   core_unix
   core_unix.command_unix
   core_unix.filename_unix
-  market-maker)
+  market-maker
+  (select
+   status_tui.ml
+   from
+   (bonsai bonsai_term -> status_tui.bonsai.ml)
+   (-> status_tui.fallback.ml)))
  (preprocess
   (pps ppx_jane)))
