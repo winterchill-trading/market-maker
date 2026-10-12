@@ -69,6 +69,7 @@ HL_PRIVATE_KEY=... market-maker -venue hyperliquid -network testnet
 | `-params` | none | parameter overrides file, reloaded on SIGHUP (below) |
 | `-shadow-params` | none | overrides for a shadow strategy whose differing plans are logged (below) |
 | `-strategy-log` | none | write every strategy input and plan to this file (below) |
+| `-order-log` | none | write the order lifecycle to this CSV file (below) |
 | `-run-for` | until SIGINT/SIGTERM | stop after this many seconds |
 | `-summary-secs` | 10 | interval of the position and quotes summary log |
 | `-log-level` | `info` | `debug`, `info`, `warn` or `error` |
@@ -157,6 +158,64 @@ tick after it with its plan (`(Tick (now <ns>) (plan (...)))`).
 one per input; the live loop coalesces ticks on its sequencer, so its plans can come at
 slightly different moments. Books make the file grow by about 20 KB a second.
 
+### Order log
+
+`-order-log FILE` writes one CSV row per order event: every place and cancel request
+before it is sent (`place`, `cancel`, `cancel_all`), the venue's answer when it comes
+back (`ack` with `resting`, `filled`, `rejected` or `error`; `cancel_ack`,
+`cancel_all_ack`), and every order update and fill from the venue's private feed
+(`update`, `fill`). `local_ts` is the maker's clock when the event was seen, `venue_ts`
+the venue's timestamp of an update or fill, both nanoseconds since the epoch. The columns
+are listed in `lib/order_log.mli`; a 15 s binance-sim run wrote 695 rows:
+
+```
+local_ts,venue_ts,venue,symbol,event,side,price,size,order_id,client_order_id,status,trade_id,fee,detail
+1791844075720915000,,binance,BTCUSDT,place,buy,99991.6,0.002,,0x42544355534454000001000000000000,,,,
+1791844077101744000,1791844077101000000,binance,BTCUSDT,fill,buy,99983.6,0.002,371,0x42544355534454000000000000000003,maker,46,0.03999344,
+```
+
+DuckDB reads it directly (`all_varchar` keeps prices exact; cast them to
+`DECIMAL(18, 8)`):
+
+```sql
+CREATE VIEW orders AS SELECT * FROM read_csv('orders.csv', header = true, all_varchar = true);
+-- request to answer, per order
+SELECT median(a.local_ts::BIGINT - p.local_ts::BIGINT) / 1e6 AS median_ack_ms
+FROM orders p JOIN orders a USING (client_order_id)
+WHERE p.event = 'place' AND a.event = 'ack';
+```
+
+On that run: 116 acks, median 0.62 ms, p99 13.6 ms; the private feed delivered fills
+0.92 ms (median) after their venue timestamp.
+
+[`queries/fills_vs_trades.sql`](queries/fills_vs_trades.sql) puts each fill next to the
+public trade that [market-data](https://github.com/winterchill-trading/market-data)
+recorded for it (its `parquet/trades` tables, written by `market-recorder` or
+`market-data day-close`): the same trade id, or else the same price, enough size, the
+taker on the other side and the nearest exchange time within 2 s. It reports the
+exchange time difference and how much earlier the private fill reached the maker than
+the public trade reached the recorder, then a per-instrument summary:
+
+```sh
+{ echo "SET VARIABLE order_log = 'orders.csv';"
+  echo "SET VARIABLE trades = '/data/md/binance/BTCUSDT/parquet/trades/*.parquet';"
+  cat queries/fills_vs_trades.sql; } | duckdb
+```
+
+```
+venue,symbol,local_ts,venue_ts,side,price,size,is_maker,trade_id,public_trade_id,match,taker_side,exch_lag_ms,public_ms
+binance,BTCUSDT,2027-01-15 08:00:01,2027-01-15 08:00:00.99,buy,99990.00000000,0.00200000,true,500,500,id,sell,0.0,3.0
+binance,BTCUSDT,2027-01-15 08:00:02,2027-01-15 08:00:01.995,sell,100010.00000000,0.00100000,true,9001,777,nearest,buy,0.0,-2.0
+binance,BTCUSDT,2027-01-15 08:00:03,2027-01-15 08:00:02.995,sell,100020.00000000,0.00100000,true,9002,NULL,NULL,NULL,NULL,NULL
+venue,symbol,fills,matched,by_id,median_public_ms,max_exch_lag_ms
+binance,BTCUSDT,3,2,1,0.5,0.0
+```
+
+(the test's data, `test/test_fills_vs_trades.ml`; the test needs the `duckdb` CLI on
+`PATH` or in `/opt/homebrew/bin`). Hyperliquid fills carry the public trade id; where a
+venue numbers private executions apart from public trades, the match falls back to
+price and time.
+
 ### Mirrors and reconnects
 
 The shadow and the strategy log attach to the venue in the `on_venue` hook of
@@ -207,6 +266,8 @@ The other modules:
 - `Params_file`: `apply` and `load` for the override files.
 - `Shadow`: the shadow strategy and its plan comparison.
 - `Strategy_input`, `Strategy_log`: the logged events, writer, loader and replay.
+- `Order_event`, `Order_log`: the order lifecycle the venue wrapper observes and its CSV
+  writer.
 
 ## End-to-end runs
 
