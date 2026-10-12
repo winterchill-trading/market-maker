@@ -5,7 +5,8 @@ open Market_maker
 open Mm_core
 
 (* Per-instrument defaults ([Params.for_instrument]): about $100 per order, raised to 1.2x
-   the venue's minimum order value, and 10 orders of position room. *)
+   the venue's minimum order value, and 10 orders of position room. Then the flags, then
+   the overrides in [params_file] (read again on every reload). *)
 let params_for
   instrument
   ~mid
@@ -17,6 +18,7 @@ let params_for
   ~max_position
   ~requote_ms
   ~max_actions_per_sec
+  ~params_file
   =
   Or_error.try_with_join (fun () ->
     let base =
@@ -27,7 +29,7 @@ let params_for
         ?order_size:(Option.map size ~f:Size.of_string)
         ?max_position:(Option.map max_position ~f:Size.of_string)
     in
-    Params.validate
+    let flags =
       { base with
         levels = Option.value levels ~default:base.levels
       ; base_half_spread_bps =
@@ -36,7 +38,20 @@ let params_for
       ; requote_interval_ms = Option.value requote_ms ~default:base.requote_interval_ms
       ; max_actions_per_sec =
           Option.value max_actions_per_sec ~default:base.max_actions_per_sec
-      })
+      }
+    in
+    match params_file with
+    | None -> Params.validate flags
+    | Some path -> Params_file.load path ~base:flags)
+;;
+
+(* Each SIGHUP asks for a reload of the params file. *)
+let reload_on_sighup () =
+  let reader, writer = Pipe.create () in
+  Signal.handle [ Signal.hup ] ~f:(fun _ ->
+    Log.Global.info "SIGHUP: reloading the params file";
+    Pipe.write_without_pushback_if_open writer ());
+  reader
 ;;
 
 let command =
@@ -107,6 +122,13 @@ let command =
          "-max-actions-per-sec"
          (optional int)
          ~doc:"N halt when plans send more cancels and places than this in a second (100)"
+     and params_file =
+       flag
+         "-params"
+         (optional Filename_unix.arg_type)
+         ~doc:
+           "FILE parameter overrides, a sexp such as ((levels 5) (skew_bps 6)); read \
+            again on SIGHUP, which restarts the loop with them if they validate"
      and run_for =
        flag
          "-run-for"
@@ -152,8 +174,10 @@ let command =
        let stop =
          Mm_core.Live.stop_signal ?run_for:(Option.map run_for ~f:Time_ns.Span.of_sec) ()
        in
+       let reload = Option.map params_file ~f:(fun _ -> reload_on_sighup ()) in
        let%map outcome =
          Runner.connect_and_run
+           ?reload
            ~symbol
            ~params:
              (params_for
@@ -164,7 +188,8 @@ let command =
                 ~skew_bps
                 ~max_position
                 ~requote_ms
-                ~max_actions_per_sec)
+                ~max_actions_per_sec
+                ~params_file)
            ~summary_interval:(Time_ns.Span.of_sec summary_secs)
            ~stop
        in
