@@ -136,6 +136,13 @@ let command =
          ~doc:
            "FILE overrides for a shadow strategy run on the same inputs; its plans are \
             logged where they differ from the live ones (read again on SIGHUP)"
+     and strategy_log =
+       flag
+         "-strategy-log"
+         (optional Filename_unix.arg_type)
+         ~doc:
+           "FILE write every strategy input and plan there, one sexp per line, for \
+            offline replay (debugging; books make it grow fast)"
      and run_for =
        flag
          "-run-for"
@@ -201,6 +208,7 @@ let command =
        let%map outcome =
          Runner.connect_and_run
            ?reload
+           ?strategy_log
            ?shadow_params:
              (Option.map shadow_params_file ~f:(fun path ->
                 params_for ~params_file:(Some path)))
