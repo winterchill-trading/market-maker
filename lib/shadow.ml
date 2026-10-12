@@ -104,4 +104,11 @@ let on_input ?(on_difference = log_difference) t input ~now =
       on_difference ~live ~shadow))
 ;;
 
+let on_resync t ~now =
+  t.live <- Mm_core.Strategy.on_resync t.live ~now;
+  t.shadow <- Mm_core.Strategy.on_resync t.shadow ~now
+;;
+
+let live_mode t = Mm_core.Strategy.mode t.live
+let shadow_mode t = Mm_core.Strategy.mode t.shadow
 let stats t = { Stats.plans = t.plans; differing = t.differing }

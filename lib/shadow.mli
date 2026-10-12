@@ -57,4 +57,15 @@ val on_input
   -> now:int
   -> unit
 
+(** Starts the action rate grace period of both strategies at [now]
+    ([Mm_core.Strategy.on_resync]), as the live loop does on a venue reconnect, so a
+    requote burst after the resync does not halt them when it does not halt the live one. *)
+val on_resync : t -> now:int -> unit
+
+(** The mode of the mirror of the live strategy. *)
+val live_mode : t -> Mm_core.Strategy.Mode.t
+
+(** The mode of the shadow strategy. *)
+val shadow_mode : t -> Mm_core.Strategy.Mode.t
+
 val stats : t -> Stats.t
