@@ -250,6 +250,7 @@ let command =
            ?reload
            ?strategy_log
            ?order_log
+           ~cycle_monitor:(Cycle_monitor.create ())
            ?shadow_params:
              (Option.map shadow_params_file ~f:(fun path ->
                 params_for ~params_file:(Some path)))
