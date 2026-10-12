@@ -70,19 +70,34 @@ let%expect_test "load from a file" =
 
 let%expect_test "action rate grace and cooldown keys" =
   (* Left out of the base sexp at their defaults, still known names. The cooldown is a
-     plain number: leaving it out means none. *)
+     number of milliseconds or a span: leaving it out means none. *)
   show "((action_rate_grace_ms 2000) (action_rate_cooldown_ms 30000))";
   show "((action_rate_grace_ms 5000))";
   show "((action_rate_grace_ms -1))";
   show "((action_rate_cooldown_ms 0))";
   [%expect
     {|
-    (ok ((action_rate_grace_ms 2000) (action_rate_cooldown_ms 30000)))
+    (ok ((action_rate_grace_ms 2s) (action_rate_cooldown_ms 30s)))
     (ok ())
     (rejected
      ("invalid params" (errors ("action_rate_grace_ms must be non-negative"))))
     (rejected
      ("invalid params" (errors ("action_rate_cooldown_ms must be positive"))))
+    |}];
+  return ()
+;;
+
+let%expect_test "durations as spans or integer milliseconds" =
+  show "((requote_interval_ms 500ms) (order_ttl_ms 2m))";
+  show "((requote_interval_ms 500) (order_ttl_ms 120000))";
+  show "((requote_interval_ms 1000) (max_data_age_ms 5s))";
+  show "((action_rate_cooldown_ms 30s))";
+  [%expect
+    {|
+    (ok ((requote_interval_ms 500ms) (order_ttl_ms 2m)))
+    (ok ((requote_interval_ms 500ms) (order_ttl_ms 2m)))
+    (ok ())
+    (ok ((action_rate_cooldown_ms 30s)))
     |}];
   return ()
 ;;
