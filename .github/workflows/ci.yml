@@ -9,6 +9,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck scripts/*.sh
+      - name: Install duckdb CLI (the order log query test runs it)
+        run: |
+          curl -sSL -o /tmp/duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-linux-amd64.zip
+          sudo unzip -o /tmp/duckdb.zip -d /usr/local/bin
+          duckdb --version
       - uses: winterchill-trading/infra/.github/actions/ox-setup@main
         with:
           pins: |
