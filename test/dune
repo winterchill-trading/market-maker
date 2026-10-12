@@ -14,6 +14,7 @@
   mm-core
   uri)
  (inline_tests
+  (deps ../queries/fills_vs_trades.sql)
   (flags
    (:standard -source-tree-root .)))
  (preprocess
