@@ -13,6 +13,7 @@
   binance-protocol
   binance-client
   bybit-protocol
-  bybit-client)
+  bybit-client
+  core_unix)
  (preprocess
   (pps ppx_jane)))
