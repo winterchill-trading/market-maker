@@ -21,7 +21,8 @@ let%expect_test "complete lines only, then a restart after truncation" =
   let%bind () = Writer.save path ~contents:"e\n" in
   let%bind () = read () in
   let%bind () = read () in
-  [%expect {|
+  [%expect
+    {|
     (Lines (a,1 b,2))
     (Lines (c,3 d,4))
     (Lines ())
