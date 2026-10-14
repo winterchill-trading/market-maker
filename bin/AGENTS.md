@@ -9,5 +9,5 @@ otherwise. `venue_script.ml` runs the order sequence used by `compare-venues.sh`
 
 Rules:
 
-- Flag names are used by the scripts and by `infra`;
+- Flag names are used by the scripts and by `infra`; check them before renaming one.
 - Mainnet is refused unless `-i-understand-mainnet` is passed; do not weaken the check.
