@@ -12,7 +12,8 @@
   hl-sim
   market-maker
   mm-core
-  uri)
+  uri
+  yojson)
  (inline_tests
   (deps ../queries/fills_vs_trades.sql)
   (flags
