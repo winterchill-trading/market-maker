@@ -104,3 +104,46 @@ let%expect_test "parse_line reads back what rows writes" =
     |}];
   return ()
 ;;
+
+let%expect_test "plausibility rows" =
+  let symbol = Symbol.of_string "BTCUSDT" in
+  let guard e = print (Plausibility { symbol; event = Reference e }) in
+  let gate e = print (Plausibility { symbol; event = Toxicity e }) in
+  guard
+    (Diverged
+       { divergence_bps = 61.234
+       ; held_ms = 2_000
+       ; venue_mid = Price.of_string "100612"
+       ; reference_mid = Price.of_string "100000"
+       });
+  guard
+    (Reference_jumped
+       { from_ = Price.of_string "100000"
+       ; to_ = Price.of_string "101000"
+       ; jump_bps = 100.
+       });
+  guard (Reference_missing { age_ms = None });
+  guard (Reference_missing { age_ms = Some 31_000 });
+  guard Resumed;
+  gate (Widening { signal = 0.83 });
+  gate (Pulled { signal = 0.97 });
+  gate Cleared;
+  print (Toxicity { symbol; signal = 0.5; imbalance = -0.25; decision = Normal });
+  print
+    (Toxicity
+       { symbol
+       ; signal = 0.875
+       ; imbalance = 0.6
+       ; decision =
+           Widen
+             { intensity = 0.5
+             ; extra_half_spread_bps = 2.5
+             ; reservation_shift_bps = 0.6
+             ; size_factor = 0.75
+             }
+       });
+  print
+    (Toxicity { symbol; signal = 0.99; imbalance = 1.; decision = Pull { signal = 0.99 } });
+  [%expect {| |}];
+  return ()
+;;
