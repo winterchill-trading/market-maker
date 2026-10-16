@@ -10,10 +10,10 @@ network; mainnet is refused unless the operator passes an explicit flag.
 
 | Path | Holds |
 | --- | --- |
-| `lib/` | Library `market-maker` (module `Market_maker`): venue runners, sessions, parameter files, shadow strategy, strategy and order logs, replay, cycle monitor |
+| `lib/` | Library `market-maker` (module `Market_maker`): venue runners, sessions, parameter files, shadow strategy, strategy and order logs, replay, cycle monitor, reference and toxicity sources |
 | `bin/` | The `market-maker` binary and the status viewer (`status_tui.bonsai.ml` or `status_tui.fallback.ml`, chosen by dune) |
 | `queries/` | `fills_vs_trades.sql`, which joins fills to public trades in the Parquet tables |
-| `scripts/` | `e2e.sh` (one venue against its simulator), `e2e-all.sh` (all three), `compare-venues.sh` |
+| `scripts/` | `e2e.sh` (one venue against its simulator), `e2e-all.sh` (all three), `e2e-plausibility.sh` (guard and gate on an anchored hl-sim), `compare-venues.sh` |
 | `test/` | Expect and unit tests, including the signed Hyperliquid test |
 | `.github/` | `ci.yml` (build, test, shellcheck) and `nightly.yml` (builds against upstream main, weekly end-to-end run) |
 
@@ -43,12 +43,16 @@ the published dependencies, then run `dune build` here.
 - Signed requests: with `HL_PRIVATE_KEY` set, Hyperliquid requests are signed through the
   `hl-client` trading handle. A signed run against mainnet needs `-i-understand-mainnet`.
 - Parameters reload on SIGHUP through `-params FILE`. Invalid parameters are logged and the old ones
-  stay.
+  stay. `reference_guard` and `toxicity_gate` are records merged field by field with the defaults.
+- The guard and the gate are fed by `-reference` and `-toxicity-bucket`; the sources live here
+  (`Reference_source`, `Toxicity_source`), the checks in `mm-core`. Feed both to the loop and to
+  the mirrors (`Strategy_input.Reference`, `Toxicity`), as `Session` does.
 - Comments for humans at pinned numbers and tolerances; the latency table is measured on one machine.
 
 ## Dependencies
 
-- Depends on sibling repositories: `exchange-core`, `mm-core`, `hl-protocol`, `hl-client`, `hl-mm`,
+- Depends on sibling repositories: `exchange-core`, `mm-core`, `mm-core-replay` (same repository as
+  `mm-core`), `market-data`, `hl-protocol`, `hl-client`, `hl-mm`,
   `binance-protocol`, `binance-client`, `bybit-protocol`, `bybit-client`. Tests also use `hl-sim`.
 - Used by `infra` (service image and compose stack).
 - CI pin order is the `pins:` list in `.github/workflows/ci.yml`; `nightly.yml` keeps its own list in
@@ -70,6 +74,10 @@ runs the end-to-end script weekly. The `obj-magic` job calls the reusable workfl
 - The action-rate kill switch trips on the requote burst after a simulator restart. The default cap
   of 100 and the grace period (`-action-rate-grace-ms`) cover it; read the README before changing them.
 - The position is not flattened on stop; `stop` only cancels resting orders.
+- The plausibility e2e thresholds (VPIN widen 0.65, pull 0.85) are tuned to hl-sim's mixed flow; a
+  weaker burst fails the run. `NO_BUILD=1` reuses built binaries when a sibling does not build.
+- `-toxicity-signal percentile` relaxes under lasting one-sided flow (its history fills with high
+  values); use `vpin` for a sustained regime.
 - Hyperliquid signing is verified against SDK vectors, not against acceptance on testnet: `hl-sim`
   does not check signatures.
 
