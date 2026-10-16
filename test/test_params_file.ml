@@ -101,3 +101,70 @@ let%expect_test "durations as spans or integer milliseconds" =
     |}];
   return ()
 ;;
+
+let%expect_test "toxicity gate and reference guard" =
+  (* Left out of the base sexp while off. Listed fields replace the defaults; the others
+     keep them, and durations may be integer milliseconds as at the top level. *)
+  show "((toxicity_gate ()))";
+  show "((toxicity_gate ((pull_at 0.9) (max_signal_age_ms 5000))))";
+  show "((reference_guard ((band_bps 20) (grace_ms 500ms) (max_jump_bps (100)))))";
+  [%expect
+    {|
+    (ok
+     ((toxicity_gate
+       ((widen_from 0.8) (pull_at 0.95) (max_extra_half_spread_bps 5)
+        (skew_bps 2) (size_cut 0.5) (max_signal_age_ms 1m)))))
+    (ok
+     ((toxicity_gate
+       ((widen_from 0.8) (pull_at 0.9) (max_extra_half_spread_bps 5) (skew_bps 2)
+        (size_cut 0.5) (max_signal_age_ms 5s)))))
+    (ok
+     ((reference_guard
+       ((band_bps 20) (grace_ms 500ms) (max_jump_bps (100))
+        (max_reference_age_ms 30s) (stale_reference Pull)))))
+    |}];
+  return ()
+;;
+
+let%expect_test "toxicity gate and reference guard: fields keep the base's values" =
+  let base =
+    ok_exn
+      (Params_file.apply
+         base
+         ~overrides:(Sexp.of_string "((toxicity_gate ((pull_at 0.9))))"))
+  in
+  (match
+     Params_file.apply
+       base
+       ~overrides:(Sexp.of_string "((toxicity_gate ((widen_from 0.5))))")
+   with
+   | Ok params ->
+     print_s [%sexp (params.toxicity_gate : Mm_core.Toxicity_gate.Config.t option)]
+   | Error error -> print_s [%sexp (error : Error.t)]);
+  [%expect
+    {|
+    (((widen_from 0.5) (pull_at 0.9) (max_extra_half_spread_bps 5) (skew_bps 2)
+      (size_cut 0.5) (max_signal_age_ms 1m)))
+    |}];
+  return ()
+;;
+
+let%expect_test "toxicity gate and reference guard: rejected" =
+  show "((toxicity_gate ((pull_at 0.5))))";
+  show "((reference_guard ((band 20))))";
+  show "((reference_guard 20))";
+  [%expect
+    {|
+    (rejected
+     ("invalid params"
+      (errors
+       ( "toxicity_gate: (\"invalid toxicity gate\" (\"widen_from must be below pull_at\")\
+        \n (config\
+        \n  ((widen_from 0.8) (pull_at 0.5) (max_extra_half_spread_bps 5) (skew_bps 2)\
+        \n   (size_cut 0.5) (max_signal_age_ms 1m))))"))))
+    (rejected ("unknown parameters" (in_ reference_guard) (band)))
+    (rejected
+     (reference_guard ("expected a list of (name value) fields" (sexp 20))))
+    |}];
+  return ()
+;;
