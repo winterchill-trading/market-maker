@@ -24,6 +24,8 @@
   async
   exchange-core
   mm-core
+  mm-core-replay
+  market-data
   hl-protocol
   hl-client
   hl-mm

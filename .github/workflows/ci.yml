@@ -25,6 +25,7 @@ jobs:
             venue-net https://github.com/winterchill-trading/venue-net.git
             hl-client https://github.com/winterchill-trading/hl-client.git
             mm-core https://github.com/winterchill-trading/mm-core.git
+            mm-core-replay https://github.com/winterchill-trading/mm-core.git
             hl-mm https://github.com/winterchill-trading/hl-mm.git
             binance-protocol https://github.com/winterchill-trading/binance-protocol.git
             binance-client https://github.com/winterchill-trading/binance-client.git
