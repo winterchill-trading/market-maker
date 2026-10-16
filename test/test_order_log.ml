@@ -144,6 +144,19 @@ let%expect_test "plausibility rows" =
        });
   print
     (Toxicity { symbol; signal = 0.99; imbalance = 1.; decision = Pull { signal = 0.99 } });
-  [%expect {| |}];
+  [%expect
+    {|
+    1000,,binance,BTCUSDT,guard,,100000,,,,diverged,,,divergence_bps=61.23 held_ms=2000 venue_mid=100612
+    1000,,binance,BTCUSDT,guard,,101000,,,,reference_jumped,,,from=100000 jump_bps=100.00
+    1000,,binance,BTCUSDT,guard,,,,,,reference_missing,,,no reference yet
+    1000,,binance,BTCUSDT,guard,,,,,,reference_missing,,,age_ms=31000
+    1000,,binance,BTCUSDT,guard,,,,,,resumed,,,
+    1000,,binance,BTCUSDT,gate,,,,,,widening,,,signal=0.8300
+    1000,,binance,BTCUSDT,gate,,,,,,pulled,,,signal=0.9700
+    1000,,binance,BTCUSDT,gate,,,,,,cleared,,,
+    1000,,binance,BTCUSDT,toxicity,,,,,,normal,,,signal=0.5000 imbalance=-0.2500
+    1000,,binance,BTCUSDT,toxicity,,,,,,widen,,,signal=0.8750 imbalance=0.6000 intensity=0.5000 extra_half_spread_bps=2.50 shift_bps=0.60 size_factor=0.7500
+    1000,,binance,BTCUSDT,toxicity,,,,,,pull,,,signal=0.9900 imbalance=1.0000
+    |}];
   return ()
 ;;
