@@ -368,6 +368,10 @@ module type RUNNER = sig
     -> ?reload:unit Pipe.Reader.t
     -> ?shadow_params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> ?strategy_log:string
+    -> ?order_log:string
+    -> ?cycle_monitor:Cycle_monitor.t
+    -> ?reference:Reference_source.Spec.t
+    -> ?toxicity:Toxicity_source.Config.t
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t
@@ -383,7 +387,12 @@ The other modules:
 
 - `Session.Make (V)`: one run on a venue (`connect_and_run` above) over
   `Mm_core.Live.Make`; `Session.Outcome.t` is the live report, the tick-to-order stats,
-  the number of reloads and the shadow counts.
+  the number of reloads, the shadow counts and the plausibility events by kind; it feeds
+  `?reference` mids and `?toxicity` signals to the loop and its mirrors.
+- `Reference_source`: `Spec` (`anchor` or `VENUE:SYMBOL[@URL]`), the three simulators'
+  anchor status (`Anchor_status.of_json`), polling it, and mids of a public feed.
+- `Toxicity_source`: `Signal`, `Kind` (`percentile` or `vpin`), VPIN signals from trades
+  or a feed.
 - `Restartable_venue.Make (V)`: a `Venue.S` whose `close` does nothing, so a live loop can
   stop and a new one start on the same connection (`next_loop`, `shutdown`); observers
   see every value the strategy is fed (the shadow and the strategy log use them).
