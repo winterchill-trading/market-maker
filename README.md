@@ -70,6 +70,10 @@ HL_PRIVATE_KEY=... market-maker -venue hyperliquid -network testnet
 | `-shadow-params` | none | overrides for a shadow strategy whose differing plans are logged (below) |
 | `-strategy-log` | none | write every strategy input and plan to this file (below) |
 | `-order-log` | none | write the order lifecycle to this CSV file (below) |
+| `-reference` | none | reference mids for `reference_guard`: `anchor` or `VENUE:SYMBOL[@URL]` (below) |
+| `-toxicity-bucket` | none (no signal) | VPIN bucket size in base units over the venue's public trades, for `toxicity_gate` |
+| `-toxicity-window` | 50 | buckets in the VPIN mean |
+| `-toxicity-signal` | `percentile` | `percentile` (VPIN against its history) or `vpin` (VPIN itself) |
 | `-run-for` | until SIGINT/SIGTERM | stop after this many seconds |
 | `-summary-secs` | 10 | interval of the position and quotes summary log |
 | `-log-level` | `info` | `debug`, `info`, `warn` or `error` |
@@ -156,6 +160,67 @@ restarted simulator, a dropped stream) cannot trip the switch; `action_rate_cool
 out of the parameter sexp at their defaults; in a file the cooldown is a span or a number
 of milliseconds (`(action_rate_cooldown_ms 30s)` or `(action_rate_cooldown_ms 30000)`)
 and leaving it out means none.
+
+### Reference guard and toxicity gate
+
+Two checks from mm-core, both off unless the parameters name them, both reloadable on
+SIGHUP like every other field:
+
+```
+((reference_guard ((band_bps 30) (grace_ms 1s) (max_reference_age_ms 5s)))
+ (toxicity_gate ((widen_from 0.65) (pull_at 0.85) (max_signal_age_ms 30s))))
+```
+
+A file may list only some fields of either record; the others keep the base parameters'
+value or, when the base has none, `Reference_guard.Config.default` and
+`Toxicity_gate.Config.default`, so `(toxicity_gate ())` turns the gate on with its
+defaults. Their `_ms` durations are spans or integer milliseconds, as at the top level.
+Deleting the line and reloading turns the check off again.
+
+- The **reference guard** pulls the quotes while the venue mid stays outside `band_bps` of
+  a reference mid for longer than `grace_ms`, or when no reference younger than
+  `max_reference_age_ms` has arrived (`stale_reference Pull`, the default). The reference
+  comes from `-reference`: `anchor` polls the simulator's own anchor when it runs with
+  `-anchor` and passes the anchor's `reference_price` while it is fresh (a stale anchor
+  passes nothing, so the guard sees the reference age); `VENUE:SYMBOL[@URL]` takes the mid
+  of another venue's public best bid and offer (Hyperliquid, Binance or Bybit, its mainnet
+  without `@URL`, read-only). A reference feed only sends on top-of-book changes, so keep
+  `max_reference_age_ms` above the reference's quiet spells.
+- The **toxicity gate** widens, skews and shrinks the quotes as a toxicity signal rises
+  past `widen_from`, and pulls them at `pull_at`. `-toxicity-bucket SIZE` measures VPIN
+  (market-data's `Toxicity`) over buckets of that much base volume of the venue's own
+  public trades; each filled bucket is one measurement (`Toxicity_source`, the pattern of
+  mm-core-replay's `Toxicity_input`). `-toxicity-signal percentile` (default) passes the
+  VPIN percentile against its history, which the gate's default thresholds are set for;
+  it jumps on a change of regime but relaxes when one-sided flow lasts. `vpin` passes VPIN
+  itself once `-toxicity-window` buckets are full; it stays high while the flow stays
+  one-sided, and its thresholds need setting from the instrument's usual level.
+
+Either check set without its source is logged as an error at start and on every reload
+that keeps it (a guard that pulls on a missing reference would never quote). Reference
+mids and measurements also go to the shadow strategy and the strategy log (`Reference`
+and `Toxicity` inputs, with their time), so a replay sees them.
+
+The order log gets a `guard` row per guard event (`diverged`, `reference_jumped`,
+`reference_missing`, `resumed`), a `gate` row per change of the gate's decision
+(`widening`, `pulled`, `cleared`) and a `toxicity` row per measurement with the decision
+it leads to (`normal`, `widen` with the extra half-spread, shift and size factor, or
+`pull`); the status viewer shows the latest of each, and the report counts the events:
+
+```
+guard     resumed (12.3s ago)
+gate      widening (0.4s ago)  signal=0.6706
+toxicity  widen (0.4s ago)  signal=0.6706 imbalance=0.8800 intensity=0.0353 extra_half_spread_bps=0.35 shift_bps=0.06 size_factor=0.9824
+plausibility     gate cleared 2, gate pulled 1, gate widening 3, guard reference_missing 1, guard resumed 1
+```
+
+Where each simulator serves its anchor status, for `-reference anchor`:
+
+| Venue | Anchor status | Anchor named by |
+| --- | --- | --- |
+| hyperliquid (hl-sim) | `GET /status`, the `anchors` list (`fresh` true or false) | its spec, `hyperliquid:BTC=BTC` |
+| binance (binance-sim) | `GET /sim/anchor` (`state` fresh or stale) | `sim_symbol` |
+| bybit (bybit-sim) | `GET /sim/anchor` (`fresh` true or false) | `symbol` |
 
 ### Shadow parameters
 
@@ -328,6 +393,7 @@ FAULT_AT=10 scripts/e2e.sh hl 30  # restart hl-sim 10 s in, check the recovery
 SIGNED=1 scripts/e2e.sh hl 15     # sign with a throwaway key, check hl-sim's journal
 scripts/e2e-all.sh                # all three, then a fault run on binance
 scripts/compare-venues.sh         # one order sequence on hl-sim and binance-sim, diffed
+scripts/e2e-plausibility.sh       # frozen reference and toxic burst on an anchored hl-sim
 ```
 
 `e2e.sh` builds the simulator and the binary in the dune workspace (the parent of this
@@ -357,6 +423,21 @@ simulator's book jumps for its first seconds and the maker requotes on every jum
 the action rate grace period that burst tripped a permanent halt (seen on all three
 venues), so the run used to pass `-max-actions-per-sec 1000`. Now the reconnect starts a
 5 s grace period (`-action-rate-grace-ms`) in which the burst is not counted.
+
+`e2e-plausibility.sh` starts a reference hl-sim and a venue hl-sim whose BTC follows it
+live (`-anchor hyperliquid:BTC -anchor-base-url`), and runs the maker on the venue for 75
+s with `-reference anchor`, a VPIN signal (buckets of 0.05 BTC, window 10, `vpin`) and a
+params file turning on the guard (2 s maximum reference age) and the gate (widen from
+0.65, pull at 0.85). 15 s in it pauses the reference simulator for 8 s (SIGSTOP, then
+SIGCONT); 35 s in it sends 100 IOC buys of 0.02 BTC, one every 0.1 s. From the order log
+it checks that the guard pulled (`reference_missing`) and resumed after the thaw with no
+`place` row in between, and that the gate widened, with quotes still placed, before it
+pulled, and placed nothing while pulled. Two runs on one machine (2026-10-16): the guard
+pulled 4 s after the pause (2 s for the venue's anchor to go stale, 2 s of reference age)
+and resumed 0.3 s after the thaw; VPIN went from about 0.45 to 0.67 (widening) 2 s into
+the burst and to 0.87 (pulled) 6 to 10 s in, and the gate cleared about 13 s after the
+burst. Its thresholds are set for this simulator's mixed flow, whose VPIN wanders between
+0.4 and 0.6; with half the burst size VPIN peaked at 0.8 and the run failed.
 
 Fault runs of 30 s with the restart 10 s in, default cap, grace period off and on:
 
@@ -490,8 +571,10 @@ the reconnect's grace period). A signed Hyperliquid run (`HL_PRIVATE_KEY` set to
 throwaway key) quotes on an in-process hl-sim whose clock is the test's synthetic one; the
 test recovers the signer of every journalled request: the maker's orders and cancels are
 signed by the key, for the key's account. `Params_file`, `Shadow`,
-`Strategy_log`, `Restartable_venue`, `Order_log`, `Order_log_status` and `Cycle_monitor`
-have their own tests; a session writes an order log (places, acks, a fill, the final
+`Strategy_log`, `Restartable_venue`, `Order_log`, `Order_log_status`, `Reference_source`,
+`Toxicity_source` and `Cycle_monitor` have their own tests; a session with a reference
+pipe pulls on a 50 bps divergence and on a frozen reference and resumes, and one with a
+toxicity pipe widens, pulls and clears; a session writes an order log (places, acks, a fill, the final
 cancel-all) and counts a cycle that blocks the scheduler for 60 ms;
 `queries/fills_vs_trades.sql` runs through the `duckdb` CLI (CI installs it).
 
