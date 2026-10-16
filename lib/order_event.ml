@@ -23,4 +23,14 @@ type t =
       }
   | Update of Mm_core.Order_update.t
   | Fill of Mm_core.Fill.t
+  | Plausibility of
+      { symbol : Symbol.t
+      ; event : Mm_core.Strategy.Event.t
+      }
+  | Toxicity of
+      { symbol : Symbol.t
+      ; signal : float
+      ; imbalance : float
+      ; decision : Mm_core.Toxicity_gate.Decision.t
+      }
 [@@deriving sexp_of]

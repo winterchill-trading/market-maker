@@ -157,6 +157,89 @@ let update_status : Mm_core.Order_update.Status.t -> string = function
   | Rejected -> "rejected"
 ;;
 
+(* Plausibility rows: [status] names what happened, [price] is the reference mid where
+   there is one, [detail] lists the numbers as [key=value] pairs. *)
+let kv pairs =
+  String.concat ~sep:" " (List.map pairs ~f:(fun (k, v) -> sprintf "%s=%s" k v))
+;;
+
+let bps x = sprintf "%.2f" x
+let ratio x = sprintf "%.4f" x
+
+let guard_row symbol : Mm_core.Reference_guard.Event.t -> Row.t = function
+  | Diverged { divergence_bps; held_ms; venue_mid; reference_mid } ->
+    Row.create
+      symbol
+      "guard"
+      ~status:"diverged"
+      ~price:reference_mid
+      ~detail:
+        (kv
+           [ "divergence_bps", bps divergence_bps
+           ; "held_ms", Int.to_string held_ms
+           ; "venue_mid", Price.to_string venue_mid
+           ])
+  | Reference_jumped { from_; to_; jump_bps } ->
+    Row.create
+      symbol
+      "guard"
+      ~status:"reference_jumped"
+      ~price:to_
+      ~detail:(kv [ "from", Price.to_string from_; "jump_bps", bps jump_bps ])
+  | Reference_missing { age_ms } ->
+    Row.create
+      symbol
+      "guard"
+      ~status:"reference_missing"
+      ~detail:
+        (match age_ms with
+         | None -> "no reference yet"
+         | Some age_ms -> kv [ "age_ms", Int.to_string age_ms ])
+  | Resumed -> Row.create symbol "guard" ~status:"resumed"
+;;
+
+let gate_row symbol : Mm_core.Toxicity_gate.Event.t -> Row.t = function
+  | Widening { signal } ->
+    Row.create symbol "gate" ~status:"widening" ~detail:(kv [ "signal", ratio signal ])
+  | Pulled { signal } ->
+    Row.create symbol "gate" ~status:"pulled" ~detail:(kv [ "signal", ratio signal ])
+  | Cleared -> Row.create symbol "gate" ~status:"cleared"
+;;
+
+let decision_fields : Mm_core.Toxicity_gate.Decision.t -> string * (string * string) list
+  = function
+  | Normal -> "normal", []
+  | Widen { intensity; extra_half_spread_bps; reservation_shift_bps; size_factor } ->
+    ( "widen"
+    , [ "intensity", ratio intensity
+      ; "extra_half_spread_bps", bps extra_half_spread_bps
+      ; "shift_bps", bps reservation_shift_bps
+      ; "size_factor", ratio size_factor
+      ] )
+  | Pull { signal = _ } -> "pull", []
+;;
+
+let plausibility_rows : Order_event.t -> Row.t list = function
+  | Plausibility { symbol; event = Reference e } -> [ guard_row symbol e ]
+  | Plausibility { symbol; event = Toxicity e } -> [ gate_row symbol e ]
+  | Toxicity { symbol; signal; imbalance; decision } ->
+    let status, fields = decision_fields decision in
+    [ Row.create
+        symbol
+        "toxicity"
+        ~status
+        ~detail:(kv ([ "signal", ratio signal; "imbalance", ratio imbalance ] @ fields))
+    ]
+  | Place _
+  | Placed _
+  | Cancel _
+  | Cancelled _
+  | Cancel_all _
+  | Cancelled_all _
+  | Update _
+  | Fill _ -> []
+;;
+
 let event_rows : Order_event.t -> Row.t list = function
   | Place requests -> List.map requests ~f:(request_row "place")
   | Placed { requests; result = Ok statuses } ->
@@ -217,6 +300,7 @@ let event_rows : Order_event.t -> Row.t list = function
         ~trade_id:f.trade_id
         ~fee:f.fee
     ]
+  | (Plausibility _ | Toxicity _) as event -> plausibility_rows event
 ;;
 
 let rows ~venue ~local_ts event =
