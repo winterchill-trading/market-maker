@@ -188,6 +188,36 @@ let command =
          ~doc:
            "FILE write every order request, answer, order update and fill there as CSV \
             rows with local and venue timestamps (see queries/fills_vs_trades.sql)"
+     and reference =
+       flag
+         "-reference"
+         (optional Reference_source.Spec.arg_type)
+         ~doc:
+           "SOURCE reference mids for the params' reference_guard: anchor (the \
+            simulator's anchor reference, when it runs with -anchor) or \
+            VENUE:SYMBOL[@URL] (another venue's public best bid and offer; its mainnet \
+            without @URL)"
+     and toxicity_bucket =
+       flag
+         "-toxicity-bucket"
+         (optional string)
+         ~doc:
+           "SIZE measure VPIN over buckets of this much base volume of the venue's \
+            public trades, for the params' toxicity_gate"
+     and toxicity_window =
+       flag
+         "-toxicity-window"
+         (optional int)
+         ~doc:"N buckets in the VPIN mean (default 50)"
+     and toxicity_signal =
+       flag
+         "-toxicity-signal"
+         (optional_with_default
+            Toxicity_source.Kind.Percentile
+            Toxicity_source.Kind.arg_type)
+         ~doc:
+           "KIND percentile (VPIN against its history, the default) or vpin (VPIN \
+            itself, once the window is full)"
      and run_for =
        flag
          "-run-for"
@@ -229,6 +259,20 @@ let command =
              ~network:(Venues.Network.to_string network)
              ~endpoint:Runner.endpoint
              (symbol : Symbol.t)];
+       let%bind toxicity =
+         match toxicity_bucket with
+         | None -> return None
+         | Some bucket ->
+           Or_error.try_with_join (fun () ->
+             Toxicity_source.Config.create
+               ?window:toxicity_window
+               ~kind:toxicity_signal
+               ~bucket_volume:(Market_data.Size.of_string bucket)
+               ())
+           |> Or_error.tag ~tag:"-toxicity-bucket"
+           |> Deferred.return
+           >>| Option.some
+       in
        let%bind min_notional = Runner.min_notional symbol in
        Log.Global.info_s [%message "venue minimum" (min_notional : Usd.t option)];
        let stop =
@@ -260,6 +304,8 @@ let command =
            ?strategy_log
            ?order_log
            ~cycle_monitor:(Cycle_monitor.create ())
+           ?reference
+           ?toxicity
            ?shadow_params:
              (Option.map shadow_params_file ~f:(fun path ->
                 params_for ~params_file:(Some path)))
