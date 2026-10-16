@@ -7,6 +7,8 @@ of `../README.md`:
 - `Session`: one run over `Mm_core.Live.Make`, with the report and tick-to-order stats.
 - `Params_file`, `Shadow`, `Strategy_input`, `Strategy_log`, `Replay`: parameter files, the shadow
   strategy, the input and plan log, and the replay that compares every plan.
+- `Reference_source`, `Toxicity_source`: reference mids (a simulator's anchor status or another
+  venue's best bid and offer) and VPIN signals for mm-core's reference guard and toxicity gate.
 - `Order_log`, `Cycle_monitor`, `Venue_script`: the order CSV, the slow-cycle counter, and the
   sequence used by `compare-venues.sh`.
 
