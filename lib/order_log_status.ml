@@ -22,6 +22,15 @@ module Fill = struct
   [@@deriving sexp_of]
 end
 
+module Check = struct
+  type t =
+    { status : string
+    ; since_ns : int
+    ; detail : string
+    }
+  [@@deriving sexp_of]
+end
+
 let max_fills = 8
 let max_latencies = 200
 
@@ -38,6 +47,9 @@ type t =
   ; pending_places : int String.Map.t (* client order id -> local time of the place *)
   ; latencies : int Fqueue.t
   ; last_ns : int option
+  ; guard : Check.t option
+  ; gate : Check.t option
+  ; toxicity : Check.t option
   }
 [@@deriving sexp_of]
 
@@ -54,6 +66,9 @@ let empty =
   ; pending_places = String.Map.empty
   ; latencies = Fqueue.empty
   ; last_ns = None
+  ; guard = None
+  ; gate = None
+  ; toxicity = None
   }
 ;;
 
@@ -66,6 +81,9 @@ let fees t = t.fees
 let recent_fills t = t.recent_fills
 let count t event = Map.find t.counts event |> Option.value ~default:0
 let last_ns t = t.last_ns
+let guard t = t.guard
+let gate t = t.gate
+let toxicity t = t.toxicity
 
 let ack_latency t =
   match Fqueue.to_list t.latencies |> List.sort ~compare:Int.compare with
@@ -93,8 +111,24 @@ let add_latency t latency =
 
 let remove_resting t order_id = { t with resting = Map.remove t.resting order_id }
 
-let apply t ~local_ns ~event ~side ~price ~size ~order_id ~client_order_id ~status ~fee =
+let apply
+  t
+  ~local_ns
+  ~event
+  ~side
+  ~price
+  ~size
+  ~order_id
+  ~client_order_id
+  ~status
+  ~fee
+  ~detail
+  =
+  let check = Some { Check.status; since_ns = local_ns; detail } in
   match event with
+  | "guard" -> { t with guard = check }
+  | "gate" -> { t with gate = check }
+  | "toxicity" -> { t with toxicity = check }
   | "place" ->
     { t with
       pending_places = Map.set t.pending_places ~key:client_order_id ~data:local_ns
@@ -163,7 +197,7 @@ let add_row t row =
     ; status
     ; _trade_id
     ; fee
-    ; _detail
+    ; detail
     ] ->
     (match Int.of_string_opt local_ts with
      | None -> { t with skipped = t.skipped + 1 }
@@ -186,7 +220,8 @@ let add_row t row =
          ~order_id
          ~client_order_id
          ~status
-         ~fee:(Usd.of_string_opt fee))
+         ~fee:(Usd.of_string_opt fee)
+         ~detail)
   | _ -> { t with skipped = t.skipped + 1 }
 ;;
 
@@ -245,6 +280,19 @@ let to_lines t ~now_ns =
         (Price.to_string f.price)
         (if f.maker then "" else " (taker)"))
   in
+  let check name check =
+    Option.map check ~f:(fun (c : Check.t) ->
+      sprintf
+        "%-9s %s (%.1fs ago)%s"
+        name
+        c.status
+        (Float.of_int (now_ns - c.since_ns) /. 1e9)
+        (if String.is_empty c.detail then "" else "  " ^ c.detail))
+  in
+  let checks =
+    List.filter_opt
+      [ check "guard" t.guard; check "gate" t.gate; check "toxicity" t.toxicity ]
+  in
   [ header ^ "  " ^ age
   ; sprintf
       "position %s  volume %s USD  fees %s USD"
@@ -253,8 +301,9 @@ let to_lines t ~now_ns =
       (Usd.to_string t.fees)
   ; counts
   ; latency
-  ; sprintf "resting orders (%d)" (Map.length t.resting)
   ]
+  @ checks
+  @ [ sprintf "resting orders (%d)" (Map.length t.resting) ]
   @ book
   @ [ "recent fills" ]
   @ fills
