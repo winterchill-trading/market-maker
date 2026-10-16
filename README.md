@@ -208,10 +208,20 @@ it leads to (`normal`, `widen` with the extra half-spread, shift and size factor
 `pull`); the status viewer shows the latest of each, and the report counts the events:
 
 ```
-guard     resumed (12.3s ago)
-gate      widening (0.4s ago)  signal=0.6706
-toxicity  widen (0.4s ago)  signal=0.6706 imbalance=0.8800 intensity=0.0353 extra_half_spread_bps=0.35 shift_bps=0.06 size_factor=0.9824
-plausibility     gate cleared 2, gate pulled 1, gate widening 3, guard reference_missing 1, guard resumed 1
+hyperliquid BTC  last row 125.1s ago
+position 0.00083  volume 10540.30017 USD  fees 1.58104489 USD
+place 455  ack 455  cancel 384  fill 120  update 905
+ack latency median 0.73ms max 16.61ms (last 200)
+guard     resumed (176.9s ago)
+gate      cleared (141.6s ago)
+toxicity  normal (127.6s ago)  signal=0.5783 imbalance=-1.0000
+```
+
+(`market-maker-status -once` on the order log of an `e2e-plausibility.sh` run, two
+minutes after it ended); that run's report ended with
+
+```
+plausibility     gate cleared 2, gate pulled 3, gate widening 5, guard reference_missing 1, guard resumed 1
 ```
 
 Where each simulator serves its anchor status, for `-reference anchor`:
@@ -435,7 +445,7 @@ it checks that the guard pulled (`reference_missing`) and resumed after the thaw
 pulled, and placed nothing while pulled. Two runs on one machine (2026-10-16): the guard
 pulled 4 s after the pause (2 s for the venue's anchor to go stale, 2 s of reference age)
 and resumed 0.3 s after the thaw; VPIN went from about 0.45 to 0.67 (widening) 2 s into
-the burst and to 0.87 (pulled) 6 to 10 s in, and the gate cleared about 13 s after the
+the burst and to 0.87 (pulled) 6 to 10 s in, and the gate cleared about 10 s after the
 burst. Its thresholds are set for this simulator's mixed flow, whose VPIN wanders between
 0.4 and 0.6; with half the burst size VPIN peaked at 0.8 and the run failed.
 
