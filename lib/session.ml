@@ -11,6 +11,7 @@ module Outcome = struct
     ; reloads : int
     ; shadow : Shadow.Stats.t option
     ; cycles : Cycle_monitor.Stats.t option
+    ; plausibility : (string * int) list
     }
   [@@deriving sexp_of]
 
@@ -26,9 +27,44 @@ module Outcome = struct
          ]
        @ (if t.reloads > 0 then [ sprintf "params reloads   %d" t.reloads ] else [])
        @ Option.value_map t.shadow ~default:[] ~f:(fun (s : Shadow.Stats.t) ->
-         [ sprintf "shadow plans     %d of %d differ" s.differing s.plans ]))
+         [ sprintf "shadow plans     %d of %d differ" s.differing s.plans ])
+       @
+       match t.plausibility with
+       | [] -> []
+       | counts ->
+         [ sprintf
+             "plausibility     %s"
+             (String.concat
+                ~sep:", "
+                (List.map counts ~f:(fun (name, n) -> sprintf "%s %d" name n)))
+         ])
   ;;
 end
+
+(* How a plausibility event is counted in the outcome: the order log's [event] and
+   [status] columns. *)
+let plausibility_name : Mm_core.Strategy.Event.t -> string = function
+  | Reference (Diverged _) -> "guard diverged"
+  | Reference (Reference_jumped _) -> "guard reference_jumped"
+  | Reference (Reference_missing _) -> "guard reference_missing"
+  | Reference Resumed -> "guard resumed"
+  | Toxicity (Widening _) -> "gate widening"
+  | Toxicity (Pulled _) -> "gate pulled"
+  | Toxicity Cleared -> "gate cleared"
+;;
+
+(* A gate or guard in the parameters with nothing to feed it is most likely a mistake: a
+   guard pulling on a missing reference never quotes, a gate without a signal never acts. *)
+let warn_unfed (params : Mm_core.Params.t) ~has_reference ~has_toxicity =
+  if Option.is_some params.reference_guard && not has_reference
+  then
+    Log.Global.error
+      "reference_guard is set but no reference source is configured (-reference)";
+  if Option.is_some params.toxicity_gate && not has_toxicity
+  then
+    Log.Global.error
+      "toxicity_gate is set but no toxicity source is configured (-toxicity-bucket)"
+;;
 
 let changed_fields (a : Mm_core.Params.t) (b : Mm_core.Params.t) =
   match Mm_core.Params.sexp_of_t a, Mm_core.Params.sexp_of_t b with
@@ -137,6 +173,8 @@ module Make (V : Mm_core.Venue.S) = struct
     ?strategy_log
     ?order_log
     ?cycle_monitor
+    ?reference
+    ?toxicity
     config
     ~symbol
     ~params
@@ -218,6 +256,52 @@ module Make (V : Mm_core.Venue.S) = struct
       (* Mirror strategies start the same action rate grace period as the loop's own on
          every venue reconnect. *)
       Live.on_resync live ~f:(fun () -> Prepared.on_resync prepared ~now:(now ()));
+      let log_event event =
+        Option.iter order_log ~f:(fun (_, log) -> Order_log.on_event log event)
+      in
+      let plausibility = String.Table.create () in
+      Live.on_strategy_event live ~f:(fun event ->
+        Hashtbl.incr plausibility (plausibility_name event);
+        log_event (Plausibility { symbol; event }));
+      let has_reference = Option.is_some reference
+      and has_toxicity = Option.is_some toxicity in
+      warn_unfed first_params ~has_reference ~has_toxicity;
+      let stopping = ref false in
+      (* Reference mids and toxicity measurements go to the loop and, like the venue's
+         inputs, to the mirrors, stamped with the same time. *)
+      Option.iter reference ~f:(fun reference ->
+        don't_wait_for
+          (Pipe.iter_without_pushback reference ~f:(fun mid ->
+             if not !stopping
+             then (
+               let time = now () in
+               Live.on_reference live mid;
+               Prepared.on_input prepared (Reference { time; mid }) ~now:time))));
+      Option.iter toxicity ~f:(fun toxicity ->
+        don't_wait_for
+          (Pipe.iter_without_pushback
+             toxicity
+             ~f:(fun ({ signal; imbalance } : Toxicity_source.Signal.t) ->
+               if not !stopping
+               then (
+                 let time = now () in
+                 Live.on_toxicity live ~signal ~imbalance;
+                 Prepared.on_input
+                   prepared
+                   (Toxicity { time; signal; imbalance })
+                   ~now:time;
+                 (* The decision this measurement leads to, computed as the strategy's
+                    next tick will: the loop ticks on its sequencer, later. *)
+                 let decision =
+                   match (Mm_core.Strategy.params (Live.strategy live)).toxicity_gate with
+                   | None -> Mm_core.Toxicity_gate.Decision.Normal
+                   | Some config ->
+                     Mm_core.Toxicity_gate.decide
+                       config
+                       ~now:time
+                       (Some { value = signal; imbalance; time })
+                 in
+                 log_event (Toxicity { symbol; signal; imbalance; decision })))));
       let status_stop = Ivar.create () in
       Option.iter cycle_monitor ~f:(fun monitor ->
         Cycle_monitor.start monitor;
@@ -235,6 +319,9 @@ module Make (V : Mm_core.Venue.S) = struct
                       : string)]));
       let finish ~reloads live =
         Ivar.fill_if_empty status_stop ();
+        stopping := true;
+        Option.iter reference ~f:Pipe.close_read;
+        Option.iter toxicity ~f:Pipe.close_read;
         let%bind report = Live.stop live in
         Option.iter cycle_monitor ~f:Cycle_monitor.stop;
         let tick_to_order = Live.tick_to_order live in
@@ -245,6 +332,8 @@ module Make (V : Mm_core.Venue.S) = struct
           ; reloads
           ; shadow = Option.map shadow ~f:(fun s -> Shadow.stats s.shadow)
           ; cycles = Option.map cycle_monitor ~f:Cycle_monitor.stats
+          ; plausibility =
+              Hashtbl.to_alist plausibility |> List.sort ~compare:[%compare: string * int]
           }
       in
       let reload_shadow ~live ~live_changed =
@@ -279,6 +368,7 @@ module Make (V : Mm_core.Venue.S) = struct
                 Log.Global.info_s
                   [%message
                     "params reloaded" ~changes:(changed_fields current next : Sexp.t list)];
+                warn_unfed next ~has_reference ~has_toxicity;
                 reload_shadow ~live:next ~live_changed:true;
                 Option.iter strategy_log ~f:(fun log ->
                   match Strategy_log.update_params log next with
