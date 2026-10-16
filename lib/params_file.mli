@@ -8,7 +8,20 @@
     v}
 
     Fields that are left out keep their value from the base parameters (the instrument
-    defaults and command-line flags), so deleting a line and reloading reverts it. *)
+    defaults and command-line flags), so deleting a line and reloading reverts it.
+
+    [toxicity_gate] and [reference_guard] (off unless listed) are records; a file may list
+    only some of their fields, the others keeping the base's value or, when the base has
+    none, [Mm_core.Toxicity_gate.Config.default] and
+    [Mm_core.Reference_guard.Config.default]:
+
+    {v
+((toxicity_gate ((widen_from 0.6) (pull_at 0.9) (max_signal_age_ms 10s)))
+ (reference_guard ((band_bps 30) (grace_ms 1s))))
+    v}
+
+    Their [*_ms] durations, like the top-level ones, are spans ([500ms], [10s]) or
+    integer milliseconds. *)
 
 open! Core
 

@@ -13,8 +13,8 @@ let fields_of sexp =
 ;;
 
 (* Every field name. [sexp_of_t] leaves out fields at their default
-   ([action_rate_grace_ms]) or [None] ([action_rate_cooldown_ms]), so read the names off
-   parameters where those are set. *)
+   ([action_rate_grace_ms]) or [None] ([action_rate_cooldown_ms], [toxicity_gate],
+   [reference_guard]), so read the names off parameters where those are set. *)
 let field_names =
   lazy
     (let probe =
@@ -22,6 +22,8 @@ let field_names =
          action_rate_grace_ms =
            Time_ns.Span.(Mm_core.Params.btc.action_rate_grace_ms + millisecond)
        ; action_rate_cooldown_ms = Some Time_ns.Span.millisecond
+       ; toxicity_gate = Some Mm_core.Toxicity_gate.Config.default
+       ; reference_guard = Some Mm_core.Reference_guard.Config.default
        }
      in
      match Mm_core.Params.sexp_of_t probe with
@@ -30,6 +32,51 @@ let field_names =
          | List [ Atom name; _ ] -> Some name
          | _ -> None)
      | Atom _ -> [])
+;;
+
+(* Record-valued fields. A file may list only some of their fields: the others come from
+   the base parameters' value, or from the default configuration when the base has none,
+   so [(toxicity_gate ())] turns the gate on with its defaults. *)
+let nested_defaults =
+  [ ("toxicity_gate", Mm_core.Toxicity_gate.Config.(sexp_of_t default))
+  ; ("reference_guard", Mm_core.Reference_guard.Config.(sexp_of_t default))
+  ]
+;;
+
+(* As in the top-level durations, a [*_ms] field may be a plain integer of milliseconds;
+   the nested configurations themselves only read spans. *)
+let ms_span name (value : Sexp.t) : Sexp.t =
+  match value with
+  | Atom digits
+    when String.is_suffix name ~suffix:"_ms"
+         && (not (String.is_empty digits))
+         && String.for_all digits ~f:Char.is_digit -> Atom (digits ^ "ms")
+  | value -> value
+;;
+
+let merge_nested ~name ~base ~override =
+  let open Or_error.Let_syntax in
+  let%bind base = fields_of base in
+  let%bind override = fields_of override |> Or_error.tag ~tag:name in
+  let%map () =
+    match
+      List.filter override ~f:(fun (field, _) ->
+        not (List.Assoc.mem base field ~equal:String.equal))
+    with
+    | [] -> Ok ()
+    | unknown ->
+      Or_error.error_s
+        [%message
+          "unknown parameters" ~in_:name ~_:(List.map unknown ~f:fst : string list)]
+  in
+  Sexp.List
+    (List.map base ~f:(fun (field, value) ->
+       let value =
+         match List.Assoc.find override field ~equal:String.equal with
+         | Some value -> ms_span field value
+         | None -> value
+       in
+       Sexp.List [ Atom field; value ]))
 ;;
 
 let apply (base : Mm_core.Params.t) ~overrides =
@@ -52,6 +99,17 @@ let apply (base : Mm_core.Params.t) ~overrides =
     | unknown ->
       Or_error.error_s
         [%message "unknown parameters" ~_:(List.map unknown ~f:fst : string list)]
+  in
+  let%bind overrides =
+    List.map overrides ~f:(fun (name, value) ->
+      match List.Assoc.find nested_defaults name ~equal:String.equal with
+      | None -> Ok (name, value)
+      | Some default ->
+        let base =
+          Option.value (List.Assoc.find base_fields name ~equal:String.equal) ~default
+        in
+        merge_nested ~name ~base ~override:value >>| fun value -> name, value)
+    |> Or_error.combine_errors
   in
   let merged =
     List.map base_fields ~f:(fun (name, value) ->
