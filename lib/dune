@@ -5,6 +5,9 @@
   core
   async
   uri
+  cohttp
+  cohttp-async
+  yojson
   exchange-core
   mm-core
   mm-core-replay

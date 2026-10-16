@@ -35,5 +35,7 @@
   bybit-client
   ppx_jane
   uri
-  (cohttp-async :with-test)
+  cohttp
+  cohttp-async
+  yojson
   (hl-sim :with-test)))
