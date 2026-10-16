@@ -20,8 +20,8 @@
  (reference_guard ((band_bps 30) (grace_ms 1s))))
     v}
 
-    Their [*_ms] durations, like the top-level ones, are spans ([500ms], [10s]) or
-    integer milliseconds. *)
+    Their [*_ms] durations, like the top-level ones, are spans ([500ms], [10s]) or integer
+    milliseconds. *)
 
 open! Core
 
