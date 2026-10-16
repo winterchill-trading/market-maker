@@ -6,6 +6,15 @@ type t =
   | Fill of Mm_core.Fill.t
   | Open_orders of Open_order.t list
   | Account of Account_view.t
+  | Reference of
+      { time : int
+      ; mid : Price.t
+      }
+  | Toxicity of
+      { time : int
+      ; signal : float
+      ; imbalance : float
+      }
 [@@deriving sexp, compare, equal]
 
 let apply strategy = function
@@ -13,4 +22,7 @@ let apply strategy = function
   | Fill fill -> Mm_core.Strategy.on_fill strategy fill
   | Open_orders orders -> Mm_core.Strategy.on_open_orders strategy orders
   | Account account -> Mm_core.Strategy.on_account strategy account
+  | Reference { time; mid } -> Mm_core.Strategy.on_reference strategy ~now:time mid
+  | Toxicity { time; signal; imbalance } ->
+    Mm_core.Strategy.on_toxicity strategy ~now:time ~signal ~imbalance
 ;;

@@ -41,6 +41,8 @@ let run shadow_overrides =
         | Fill _ -> "fill"
         | Open_orders _ -> "open orders"
         | Account _ -> "account"
+        | Reference _ -> "reference"
+        | Toxicity _ -> "toxicity"
       in
       printf "-- %s at %dms\n" (name input) at;
       Shadow.on_input t input ~now:(ms at) ~on_difference:print_difference);

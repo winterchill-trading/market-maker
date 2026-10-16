@@ -56,7 +56,8 @@ let%expect_test "observers see what the strategy is fed" =
        | Fill fill -> sprintf "fill %s" (Exchange_core.Trade_id.to_string fill.trade_id)
        | Open_orders orders -> sprintf "open orders, %d" (List.length orders)
        | Account account ->
-         sprintf "account, equity %s" (Exchange_core.Usd.to_string account.equity)));
+         sprintf "account, equity %s" (Exchange_core.Usd.to_string account.equity)
+       | Reference _ | Toxicity _ -> "not from the venue"));
   Fake_venue.push_book fake ~bid:"99" ~ask:"101";
   let%bind books = V.books t Fake_venue.btc in
   let%bind _ = Pipe.read books in

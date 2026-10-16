@@ -83,7 +83,9 @@ let%expect_test "replaying a log gives the same plans" =
          | Book _ -> "book"
          | Fill _ -> "fill"
          | Open_orders _ -> "open orders"
-         | Account _ -> "account")
+         | Account _ -> "account"
+         | Reference _ -> "reference"
+         | Toxicity _ -> "toxicity")
     | Resync { now } -> printf "resync at %dms\n" (now / 1_000_000)
     | Tick { now; plan } ->
       printf "tick at %dms: %d actions\n" (now / 1_000_000) (List.length plan));
