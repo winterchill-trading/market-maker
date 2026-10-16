@@ -52,7 +52,14 @@ module type RUNNER = sig
   val min_notional : Symbol.t -> Usd.t option Or_error.t Deferred.t
 
   (** [Session.Make (V).connect_and_run] with the bound configuration; [order_log] rows
-      name the venue as {!Venue_choice.to_string} does. *)
+      name the venue as {!Venue_choice.to_string} does.
+
+      [reference] opens a {!Reference_source}: [Anchor] polls this venue's simulator
+      ([/status] on hl-sim, [/sim/anchor] on binance-sim and bybit-sim, at the bound REST
+      root); a [Feed] connects to that venue's public feed. [toxicity] subscribes to this
+      venue's public trades (at the bound REST root) for a {!Toxicity_source}. A source
+      that cannot connect fails the run before the venue is touched; both are closed when
+      the run ends. *)
   val connect_and_run
     :  ?time_source:Time_source.t
     -> ?reload:unit Pipe.Reader.t
@@ -60,6 +67,8 @@ module type RUNNER = sig
     -> ?strategy_log:string
     -> ?order_log:string
     -> ?cycle_monitor:Cycle_monitor.t
+    -> ?reference:Reference_source.Spec.t
+    -> ?toxicity:Toxicity_source.Config.t
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t

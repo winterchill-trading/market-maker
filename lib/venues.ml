@@ -77,6 +77,8 @@ module type RUNNER = sig
     -> ?strategy_log:string
     -> ?order_log:string
     -> ?cycle_monitor:Cycle_monitor.t
+    -> ?reference:Reference_source.Spec.t
+    -> ?toxicity:Toxicity_source.Config.t
     -> symbol:Symbol.t
     -> params:(Instrument.t -> mid:Price.t -> Mm_core.Params.t Or_error.t)
     -> summary_interval:Time_ns.Span.t
@@ -92,6 +94,87 @@ let hyperliquid_min_notional = Usd.of_int 10
 let order_log_spec ~venue order_log =
   Option.map order_log ~f:(fun path ->
     { Order_log.Spec.path; venue = Venue_choice.to_string venue })
+;;
+
+(* Public feeds: [Feed] references (another venue, its mainnet by default) and the venue's
+   own trades for the toxicity signal. A first connection that fails raises in the
+   clients; it becomes an error here. *)
+let public_feed ~venue ~base_url ~symbol ~streams =
+  Monitor.try_with_or_error (fun () ->
+    match venue with
+    | "hyperliquid" ->
+      let config =
+        match base_url with
+        | Some base_url -> Hl_client.Config.create ~base_url ()
+        | None -> Hl_client.Config.mainnet ()
+      in
+      Hl_client.Live_feed.create config ~symbols:[ symbol ] ~streams
+    | "binance" ->
+      let config =
+        match base_url with
+        | Some base_url -> Binance_client.Config.Read_only.create ~base_url ()
+        | None -> Binance_client.Config.Read_only.mainnet ()
+      in
+      Binance_client.Live_feed.create config ~symbols:[ symbol ] ~streams
+    | "bybit" ->
+      let config =
+        match base_url with
+        | Some base_url -> Bybit_client.Config.create ~base_url ()
+        | None -> Bybit_client.Config.mainnet ()
+      in
+      Bybit_client.Live_feed.create config ~symbols:[ symbol ] ~streams
+    | venue -> raise_s [%message "no public feed for this venue" venue])
+;;
+
+(* Opens the reference and toxicity sources of a run on [venue] at [base_url] (its REST
+   root). Errors close what was already opened. *)
+let open_sources ~venue ~base_url ~symbol ?reference ?toxicity () =
+  let open Deferred.Or_error.Let_syntax in
+  let symbol = Symbol.to_string symbol in
+  let%bind reference =
+    match (reference : Reference_source.Spec.t option) with
+    | None -> return None
+    | Some Anchor ->
+      let path =
+        match (venue : Venue_choice.t) with
+        | Hyperliquid -> "/status"
+        | Binance | Bybit -> "/sim/anchor"
+      in
+      return
+        (Some
+           (Reference_source.of_anchor_status
+              ~status_url:(Uri.with_path base_url path)
+              ~symbol
+              ()))
+    | Some (Feed { venue; symbol; base_url }) ->
+      let%map feed = public_feed ~venue ~base_url ~symbol ~streams:[ Bbo ] in
+      Some (Reference_source.of_feed feed)
+  in
+  match toxicity with
+  | None -> return (reference, None)
+  | Some config ->
+    (match%bind.Deferred
+       public_feed
+         ~venue:(Venue_choice.to_string venue)
+         ~base_url:(Some base_url)
+         ~symbol
+         ~streams:[ Trades ]
+     with
+     | Ok feed -> return (reference, Some (Toxicity_source.of_feed config feed))
+     | Error error ->
+       Option.iter reference ~f:Pipe.close_read;
+       Deferred.Or_error.fail error)
+;;
+
+(* [open_sources], then [run] with them; both are closed when [run] returns. *)
+let with_sources ~venue ~base_url ~symbol ?reference ?toxicity run =
+  match%bind open_sources ~venue ~base_url ~symbol ?reference ?toxicity () with
+  | Error error -> Deferred.Or_error.fail (Error.tag error ~tag:"reference or toxicity")
+  | Ok (reference, toxicity) ->
+    let%map result = run ?reference ?toxicity () in
+    Option.iter reference ~f:Pipe.close_read;
+    Option.iter toxicity ~f:Pipe.close_read;
+    result
 ;;
 
 module Hyperliquid_live = Session.Make (Hl_mm.Hl_venue.Trading)
@@ -182,15 +265,34 @@ let hyperliquid ?base_url ?address ?(allow_mainnet = false) ~getenv ~network () 
       ?strategy_log
       ?order_log
       ?cycle_monitor
+      ?reference
+      ?toxicity
+      ~symbol
+      ~params
+      ~summary_interval
+      ~stop
       =
-      Hyperliquid_live.connect_and_run
-        ?time_source
-        ?reload
-        ?shadow_params
-        ?strategy_log
-        ?order_log:(order_log_spec ~venue order_log)
-        ?cycle_monitor
-        handle
+      with_sources
+        ~venue
+        ~base_url:config.base_url
+        ~symbol
+        ?reference
+        ?toxicity
+        (fun ?reference ?toxicity () ->
+           Hyperliquid_live.connect_and_run
+             ?time_source
+             ?reload
+             ?shadow_params
+             ?strategy_log
+             ?order_log:(order_log_spec ~venue order_log)
+             ?cycle_monitor
+             ?reference
+             ?toxicity
+             handle
+             ~symbol
+             ~params
+             ~summary_interval
+             ~stop)
     ;;
   end : RUNNER)
 ;;
@@ -246,15 +348,34 @@ let binance ?base_url ~getenv ~network () =
       ?strategy_log
       ?order_log
       ?cycle_monitor
+      ?reference
+      ?toxicity
+      ~symbol
+      ~params
+      ~summary_interval
+      ~stop
       =
-      Binance_live.connect_and_run
-        ?time_source
-        ?reload
-        ?shadow_params
-        ?strategy_log
-        ?order_log:(order_log_spec ~venue order_log)
-        ?cycle_monitor
-        config
+      with_sources
+        ~venue
+        ~base_url:config.base_url
+        ~symbol
+        ?reference
+        ?toxicity
+        (fun ?reference ?toxicity () ->
+           Binance_live.connect_and_run
+             ?time_source
+             ?reload
+             ?shadow_params
+             ?strategy_log
+             ?order_log:(order_log_spec ~venue order_log)
+             ?cycle_monitor
+             ?reference
+             ?toxicity
+             config
+             ~symbol
+             ~params
+             ~summary_interval
+             ~stop)
     ;;
   end : RUNNER)
 ;;
@@ -292,15 +413,34 @@ let bybit ?base_url ~getenv ~network () =
       ?strategy_log
       ?order_log
       ?cycle_monitor
+      ?reference
+      ?toxicity
+      ~symbol
+      ~params
+      ~summary_interval
+      ~stop
       =
-      Bybit_live.connect_and_run
-        ?time_source
-        ?reload
-        ?shadow_params
-        ?strategy_log
-        ?order_log:(order_log_spec ~venue order_log)
-        ?cycle_monitor
-        config
+      with_sources
+        ~venue
+        ~base_url:config.base_url
+        ~symbol
+        ?reference
+        ?toxicity
+        (fun ?reference ?toxicity () ->
+           Bybit_live.connect_and_run
+             ?time_source
+             ?reload
+             ?shadow_params
+             ?strategy_log
+             ?order_log:(order_log_spec ~venue order_log)
+             ?cycle_monitor
+             ?reference
+             ?toxicity
+             config
+             ~symbol
+             ~params
+             ~summary_interval
+             ~stop)
     ;;
   end : RUNNER)
 ;;

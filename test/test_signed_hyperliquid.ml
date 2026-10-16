@@ -105,6 +105,8 @@ let%expect_test "HL_PRIVATE_KEY: signed quotes on hl-sim under a synthetic clock
       ?strategy_log:None
       ?order_log:None
       ?cycle_monitor:None
+      ?reference:None
+      ?toxicity:None
       ~symbol:(Exchange_core.Symbol.of_string "BTC")
       ~params:(fun instrument ~mid -> Ok (Mm_core.Params.for_instrument instrument ~mid))
       ~summary_interval:(Time_ns.Span.of_int_sec 60)
