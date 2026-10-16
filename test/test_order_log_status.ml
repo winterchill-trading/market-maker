@@ -90,3 +90,48 @@ let%expect_test "resting orders, position and ack latency from the rows" =
   print_s [%sexp (Map.keys (Order_log_status.resting status) : string list)];
   [%expect {| () |}]
 ;;
+
+let%expect_test "guard, gate and the last toxicity measurement" =
+  let events : (int * Order_event.t) list =
+    [ 0, Toxicity { symbol = btc; signal = 0.5; imbalance = 0.1; decision = Normal }
+    ; ( 100
+      , Plausibility
+          { symbol = btc; event = Reference (Reference_missing { age_ms = None }) } )
+    ; 900, Plausibility { symbol = btc; event = Reference Resumed }
+    ; 1200, Plausibility { symbol = btc; event = Toxicity (Widening { signal = 0.85 }) }
+    ; ( 1200
+      , Toxicity
+          { symbol = btc
+          ; signal = 0.85
+          ; imbalance = 0.7
+          ; decision =
+              Widen
+                { intensity = 0.25
+                ; extra_half_spread_bps = 1.25
+                ; reservation_shift_bps = 0.35
+                ; size_factor = 0.875
+                }
+          } )
+    ]
+  in
+  let status =
+    List.fold events ~init:Order_log_status.empty ~f:(fun status (at, event) ->
+      List.fold
+        (Order_log.rows ~venue:"hyperliquid" ~local_ts:(ms at) event)
+        ~init:status
+        ~f:(fun status row -> Order_log_status.add_row status (Order_log.parse_line row)))
+  in
+  List.iter (Order_log_status.to_lines status ~now_ns:(ms 2000)) ~f:print_endline;
+  [%expect
+    {|
+    hyperliquid BTC  last row 0.8s ago
+    position 0  volume 0 USD  fees 0 USD
+    place 0  ack 0  cancel 0  fill 0  update 0
+    ack latency -
+    guard     resumed (1.1s ago)
+    gate      widening (0.8s ago)  signal=0.8500
+    toxicity  widen (0.8s ago)  signal=0.8500 imbalance=0.7000 intensity=0.2500 extra_half_spread_bps=1.25 shift_bps=0.35 size_factor=0.8750
+    resting orders (0)
+    recent fills
+    |}]
+;;
